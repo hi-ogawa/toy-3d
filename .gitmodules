@@ -1,0 +1,15 @@
+[submodule "thirdparty/imgui"]
+	path = thirdparty/imgui
+	url = git@github.com:ocornut/imgui.git
+[submodule "thirdparty/glfw"]
+	path = thirdparty/glfw
+	url = git@github.com:glfw/glfw.git
+[submodule "thirdparty/yocto-gl"]
+	path = thirdparty/yocto-gl
+	url = git@github.com:xelatihy/yocto-gl.git
+[submodule "thirdparty/pybind11"]
+	path = thirdparty/pybind11
+	url = git@github.com:pybind/pybind11.git
+[submodule "thirdparty/fmt"]
+	path = thirdparty/fmt
+	url = git@github.com:fmtlib/fmt.git
