@@ -1,3 +1,4 @@
+#include <gtest/gtest-death-test.h>
 #include <gtest/gtest.h>
 #include <fmt/format.h>
 #include "kdtree.hpp"
@@ -216,16 +217,30 @@ TEST(KDTreeTest, forEachLeaf) {
               new Leaf{2},
               new Leaf{3}}};
 
-    std::string result = "\n";
-    std::string expected = R"(
+    std::string result1 = "\n";
+    std::string expected1 = R"(
 leaf_id = 1, offset = (0, 0), size = (40, 200)
 leaf_id = 2, offset = (40, 0), size = (60, 80)
 leaf_id = 3, offset = (40, 80), size = (60, 120)
 )";
+
+    std::string result2 = "\n";
+    std::string expected2 = R"(
+leaf_id = 1, offset = (15, 5), size = (40, 200)
+leaf_id = 2, offset = (55, 5), size = (60, 80)
+leaf_id = 3, offset = (55, 85), size = (60, 120)
+)";
+
     root.forEachLeaf({0, 0}, {100, 200}, [&](Leaf& leaf, ivec2 offset, ivec2 size) {
-      result += fmt::format("leaf_id = {}, offset = ({}, {}), size = ({}, {})\n",
+      result1 += fmt::format("leaf_id = {}, offset = ({}, {}), size = ({}, {})\n",
           leaf.value_, offset[0], offset[1], size[0], size[1]);
     });
-    EXPECT_EQ(result, expected);
+    EXPECT_EQ(result1, expected1);
+
+    root.forEachLeaf({15, 5}, {100, 200}, [&](Leaf& leaf, ivec2 offset, ivec2 size) {
+      result2 += fmt::format("leaf_id = {}, offset = ({}, {}), size = ({}, {})\n",
+          leaf.value_, offset[0], offset[1], size[0], size[1]);
+    });
+    EXPECT_EQ(result2, expected2);
   }
 }

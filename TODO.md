@@ -7,22 +7,25 @@
 
 TODO
 
-- define/setup basic app state
-  - glfw window system integration
-  - imgui integration
-    - [@] imgui window layout system
-      - no titlebar
-      - menu with panel name
-      - no move
-      - resize like tile by ourselves
-      - [@] start from just two panels on the left and right
-        - investigate how it's handled by default
-          - how to change cursor
-          - how to change size, position
-            - cf SetNextWindowPos, SetNextWindowSize
-    - [?] custom render inside of imgui window
-
-- scene viewport
+- [x] glfw window system integration
+- [x] imgui integration
+- [x] introduce "command" for better handling of global state mutation
+  - just `vector<std::function<void()>>`, for starter.
+- [-] kdtree-based imgui window layout
+  - [x] add panels, draw panels
+  - [x] subtract main menu bar size
+  - [x] panel split
+  - [x] show resize cursor on separator
+  - [x] panel remove (handle in a "non-immediate" mode)
+  - [-] handle resize on mousedown (not that good yet. see)
+- [@] custom render inside of imgui window
+  - Demo > Widgets > Images
+  - ImTextureID
+  - render some texture onto imgui window
+    - load static asset into texture
+    - draw into texture
+- [ ] try https://github.com/ocornut/imgui/pull/2197
+- [ ] scene viewport
 
 - scene property editor
 

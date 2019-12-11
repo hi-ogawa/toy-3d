@@ -6,16 +6,10 @@
 
 #include "window.hpp"
 #include "kdtree.hpp"
-
-// TODO:
-// - [x] add panels, draw panels
-// - [x] subtract main menu bar size
-// - [x] panel split
-// - [@] show resize cursor on separator
-// - [ ] handle resize on click
-// - [ ] panel remove (handle in a "non-immediate" mode)
+#include "misc.hpp"
 
 using namespace toy;
+using namespace toy::misc;
 
 using Tree   = kdtree::Tree<std::string>;
 using Leaf   = kdtree::Leaf<std::string>;
@@ -50,12 +44,12 @@ struct PanelManager {
     };
   }
 
-  void splitNewNextToId(const std::string& id, kdtree::SplitType split_type = kdtree::SplitType::HORIZONTAL) {
+  void splitNewNextToId(const std::string& id, kdtree::SplitType split_type) {
     auto inserted = panels_.insertNextTo(makeFinder(id), newPanel(), split_type, 0.5, kdtree::ChildIndex::SECOND);
-    assert(inserted); // Not found Leaf next to which new leaf is supposed to be inserted
+    assert(inserted);
   }
 
-  // TODO:
+  // NOTE:
   // this cannot be called in an immediate-mode manner
   // (e.g. during `processPanel` thus during `forEachLeaf`)
   void removeById(const std::string& id) {
@@ -64,24 +58,68 @@ struct PanelManager {
   }
 };
 
-static PanelManager panel_manager_;
-static std::unique_ptr<toy::Window> window_;
-static bool done_ = false;
+struct App {
+  using Command = std::function<void()>;
+  std::vector<Command> commands_;
+  PanelManager panel_manager_;
+  std::unique_ptr<toy::Window> window_;
+  bool done_ = false;
+  ivec2 main_offset_;
+  ivec2 main_size_;
 
-void processMainMenuBar() {
+  App() {
+    window_.reset(new toy::Window{"My Window", {800, 600}});
+  }
+
+  void processMainMenuBar();
+  void processPanels();
+  void processPanel(Leaf&);
+  void processPanelResize();
+  void setMainContentRect() {
+    auto g = window_->imgui_context_;
+    // cf. ImGui::BeginMainMenuBar
+    main_offset_ = {0, g->FontBaseSize + g->Style.FramePadding.y * 2};
+    main_size_ = fromImVec2<int>(window_->io_->DisplaySize) - main_offset_;
+  }
+  void processUI() {
+    processPanelResize();
+    processMainMenuBar();
+    processPanels();
+  };
+  int exec() {
+    while(!done_) {
+      window_->newFrame();
+      setMainContentRect();
+      processUI();
+      window_->render();
+      for (auto& command : commands_) command();
+      commands_ = {};
+      done_ = done_ || window_->shouldClose();
+    }
+    return 0;
+  };
+};
+
+void App::processMainMenuBar() {
   if (ImGui::BeginMainMenuBar()) {
     if (ImGui::BeginMenu("Menu")) {
       if (panel_manager_.empty()) {
         if (ImGui::MenuItem("Add Panel")) {
-          panel_manager_.addToRoot();
+          commands_.emplace_back([&]() {
+            panel_manager_.addToRoot();
+          });
         };
       } else {
         if (ImGui::BeginMenu("Add panel")) {
           if (ImGui::MenuItem("Horizontal")) {
-            panel_manager_.addToRoot(kdtree::SplitType::HORIZONTAL);
+            commands_.emplace_back([&]() {
+              panel_manager_.addToRoot(kdtree::SplitType::HORIZONTAL);
+            });
           }
           if (ImGui::MenuItem("Vertical")) {
-            panel_manager_.addToRoot(kdtree::SplitType::VERTICAL);
+            commands_.emplace_back([&]() {
+              panel_manager_.addToRoot(kdtree::SplitType::VERTICAL);
+            });
           }
           ImGui::EndMenu();
         }
@@ -95,60 +133,79 @@ void processMainMenuBar() {
   }
 }
 
-void processPanel(Leaf& leaf) {
-  auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoResize;
+void App::processPanel(Leaf& leaf) {
   auto name = leaf.value_.data();
-  ImGui::Begin(name, nullptr, flags);
-
   if (ImGui::BeginMenuBar()) {
     if (ImGui::BeginMenu(name)) {
       if (ImGui::BeginMenu("Split")) {
         if (ImGui::MenuItem("Horizontal")) {
-          panel_manager_.splitNewNextToId(leaf.value_, kdtree::SplitType::HORIZONTAL);
+          commands_.emplace_back([&]() {
+            panel_manager_.splitNewNextToId(leaf.value_, kdtree::SplitType::HORIZONTAL);
+          });
         }
         if (ImGui::MenuItem("Vertical")) {
-          panel_manager_.splitNewNextToId(leaf.value_, kdtree::SplitType::VERTICAL);
+          commands_.emplace_back([&]() {
+            panel_manager_.splitNewNextToId(leaf.value_, kdtree::SplitType::VERTICAL);
+          });
         }
         ImGui::EndMenu();
       }
       if (ImGui::MenuItem("Close")) {
-        panel_manager_.removeById(leaf.value_);
+        commands_.emplace_back([&]() {
+          panel_manager_.removeById(leaf.value_);
+        });
       }
       ImGui::EndMenu();
     }
     ImGui::EndMenuBar();
   }
-
-  ImGui::Text("This is Panel");
-  ImGui::End();
+  ImGui::Text("-- Panel Content Here --");
 }
 
-void processPanels() {
-  // Take care offset due to MainMenuBar
-  ImGuiContext& g = *ImGui::GetCurrentContext();
-  ivec2 total_offset = {0, g.FontBaseSize + g.Style.FramePadding.y * 2};
+void App::processPanelResize() {
+  // TODO:
+  // - when mouse moves too fast and it goes further than `hit_margin`, resize dragging will stop.
+  //   so probably it needs more explicit "focus state" tracking.
+  ivec2 input = fromImVec2<int>(window_->io_->MousePos);
+  ivec2 hit_margin = {10, 10};
+  auto result = panel_manager_.panels_.hitTestSeparator(input - main_offset_, hit_margin, main_size_);
+  if (result) {
+    Branch* hit_branch;
+    float new_fraction;
+    std::tie(hit_branch, new_fraction) = result.value();
+    switch (hit_branch->split_type_) {
+      case kdtree::SplitType::HORIZONTAL : {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        break;
+      }
+      case kdtree::SplitType::VERTICAL : {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+        break;
+      }
+    }
+    // Resize if mousedown
+    if (window_->io_->MouseDown[0]) {
+      hit_branch->fraction_ = new_fraction;
+    }
+  }
+}
 
-  panel_manager_.panels_.forEachLeaf(total_offset, window_->size_, [&](Leaf& leaf, ivec2 offset, ivec2 size) {
-    ImVec2 _offset{(float)offset[0], (float)offset[1]};
-    ImVec2 _size{(float)size[0], (float)size[1]};
+void App::processPanels() {
+  panel_manager_.panels_.forEachLeaf(main_size_, [&](Leaf& leaf, ivec2 offset, ivec2 size) {
+    ImVec2 _offset = toImVec2(offset + main_offset_);
+    ImVec2 _size = toImVec2(size);
     ImGui::SetNextWindowPos(_offset);
     ImGui::SetNextWindowSize(_size);
-    processPanel(leaf);
+    auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoResize;
+    auto name = leaf.value_.data();
+    ImGui::Begin(name, nullptr, flags);
+      // "Panel" only deal with content of ImGui window.
+      processPanel(leaf);
+      ImGui::End();
   });
 }
 
-void processUI() {
-  processMainMenuBar();
-  processPanels();
-}
-
 int main(const int argc, const char* argv[]) {
-  window_.reset(new toy::Window{"My Window", {800, 600}});
-  while(!done_) {
-    window_->newFrame();
-    processUI();
-    window_->render();
-    done_ = done_ || window_->shouldClose();
-  }
-  return 0;
+  App app{};
+  return app.exec();
 }

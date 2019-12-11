@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <optional>
 #include <tuple>
 #include <memory>
@@ -192,13 +191,16 @@ template<typename T>
 struct Root {
   std::unique_ptr<Tree<T>> root_;
 
-  // Pixel-wise resize implementation based on above hitTestSeparator
-  std::optional<std::pair<Branch<T>*, float>> applyResize(ivec2 input, ivec2 hit_margin, ivec2 total_size) {
+  std::optional<std::pair<Branch<T>*, float>> hitTestSeparator(ivec2 input, ivec2 hit_margin, ivec2 size) {
     if (!root_) return {};
 
-    fvec2 n_input = input / total_size;
-    fvec2 n_hit_margin = hit_margin / total_size;
-    auto result = root_->hitTestSeparator(n_input, n_hit_margin);
+    fvec2 n_input = static_cast<fvec2>(input) / static_cast<fvec2>(size);
+    fvec2 n_hit_margin = static_cast<fvec2>(hit_margin) / static_cast<fvec2>(size);
+    return root_->hitTestSeparator(n_input, n_hit_margin);
+  }
+
+  std::optional<std::pair<Branch<T>*, float>> applyResize(ivec2 input, ivec2 hit_margin, ivec2 size) {
+    auto result = hitTestSeparator(input, hit_margin, size);
     if (!result) return {};
 
     Branch<T>* hit_branch;
@@ -240,9 +242,9 @@ struct Root {
   }
 
   // NOTE: during this loop, you cannot call `removeIf`.
-  void forEachLeaf(ivec2 offset, ivec2 size, typename Tree<T>::iter_func_t& iter_func) {
+  void forEachLeaf(ivec2 size, typename Tree<T>::iter_func_t& iter_func) {
     if (!root_) return;
-    root_->forEachLeaf(offset, size, iter_func);
+    root_->forEachLeaf({0, 0}, size, iter_func);
   }
 
 };
