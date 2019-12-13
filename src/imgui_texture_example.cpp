@@ -147,7 +147,6 @@ void main() {
     glDisable(GL_DEPTH_TEST);
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-    glViewport(0, 0, vp.x, vp.y);
     glUseProgram(program_);
     glUniform1i(uniform_location_texture_, 0);
     glUniformMatrix4fv(uniform_location_projection_, 1, GL_FALSE, (GLfloat*)&projection[0][0]);

@@ -55,6 +55,74 @@ std::ostream &operator<<(std::ostream& os, const glm::fmat4x4& A) {
 namespace toy { namespace utils {
 
 //
+// hsl <--> rgb \in [0, 1]^3
+//
+
+glm::fvec4 inline RGBtoHSL(glm::fvec4 c) {
+  int sort[3];
+  if (c.x >= c.y) {
+    if (c.y >= c.z) {
+      sort[0] = 0; sort[1] = 1; sort[2] = 2;
+    } else {
+      sort[2] = 1;
+      if (c.x >= c.z) { sort[0] = 0; sort[1] = 2; }
+      else            { sort[0] = 2; sort[1] = 0; }
+    }
+  } else {
+    if (c.y >= c.z) {
+      sort[0] = 1;
+      if (c.x >= c.z) { sort[1] = 0; sort[2] = 2; }
+      else            { sort[1] = 2; sort[2] = 0; }
+    } else {
+      sort[0] = 2; sort[1] = 1; sort[2] = 0;
+    }
+  }
+  float h_base = 2 * sort[0];
+  float h_dir = (sort[1] - sort[0]) % 3 == 1 ? 1 : -1;
+  float dh = c[sort[1]] - c[sort[2]];
+  auto h = (h_base + h_dir * dh) / 6;
+  auto s = c[sort[0]] - c[sort[2]];
+  auto l = (c.x + c.y + c.z) / 3;
+  return glm::fvec4{ h, s, l, c.w };
+};
+
+//
+// NOTE:
+// c[sort[0]], c[sort[1]], c[sort[2]] --> s, dh, l
+// [   1    0   -1 ]
+// [   0    1   -1 ]
+// [ 1/3  1/3  1/3 ]
+// and its inverse
+// [ 2/3 -1/2  1 ]
+// [-1/3  2/3  1 ]
+// [ 1/3  1/3  1 ]
+//
+glm::fvec4 inline HSLtoRGB(glm::fvec4 d) {
+  float h6 = d.x * 6, s = d.y, l = d.z;
+  float dh;
+  float csort[3];
+  int inv[3];
+  if (h6 <= 1) {
+    inv[0] = 0; inv[1] = 1; inv[2] = 2; dh = h6;
+  } else if (h6 <= 2) {
+    inv[0] = 1; inv[1] = 0; inv[2] = 2; dh = 2 - h6;
+  } else if (h6 <= 3) {
+    inv[0] = 2; inv[1] = 0; inv[2] = 1; dh = h6 - 2;
+  } else if (h6 <= 4) {
+    inv[0] = 2; inv[1] = 1; inv[2] = 0; dh = 4 - h6;
+  } else if (h6 <= 5) {
+    inv[0] = 1; inv[1] = 2; inv[2] = 0; dh = h6 - 4;
+  } else {
+    inv[0] = 0; inv[1] = 2; inv[2] = 1; dh = 6 - h6;
+  }
+  csort[0] = + 2./3. * s - 1./3. * dh + l;
+  csort[1] = - 1./3. * s + 2./3. * dh + l;
+  csort[2] = - 1./3. * s - 1./3. * dh + l;
+  return glm::fvec4{ csort[inv[0]], csort[inv[1]], csort[inv[2]], d.w };
+};
+
+
+//
 // glm::ivec2, fvec2  <-->  ImVec2
 //
 

@@ -25,20 +25,21 @@ TODO
     - https://www.khronos.org/opengl/wiki/GLAPI/glTexImage2D
   - [x] PNG image spec
     - https://tools.ietf.org/html/rfc2083
-- [@] render onto non default framebuffer
+- [x] render onto non default framebuffer
+  - https://www.khronos.org/opengl/wiki/Framebuffer_Object
   - render texture onto imgui window
-    - [@] load static asset into texture
-    - draw into texture
-    - ImTextureID
-- [ ] custom render inside of imgui window
 
-- [ ] simple scene viewport
+- [@] simple scene viewport
 
 - scene property editor
 
 - define rendering model
 
 - object/mesh picker
+
+- theory
+  - multisampling (rasterization)
+  - texture sampler
 
 
 # 2019/12/13
@@ -48,3 +49,4 @@ TODO
   - struct parameter
 
 - unity3d and c# scripting
+  - mesh generation
