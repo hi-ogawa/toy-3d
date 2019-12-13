@@ -18,17 +18,33 @@ TODO
   - [x] show resize cursor on separator
   - [x] panel remove (handle in a "non-immediate" mode)
   - [-] handle resize on mousedown (not that good yet. see)
-- [@] custom render inside of imgui window
-  - Demo > Widgets > Images
-  - ImTextureID
-  - render some texture onto imgui window
-    - load static asset into texture
+- [x] imgui texture
+- [x] render texture quad
+  - [x] OpenGL texture spec
+    - https://www.khronos.org/opengl/wiki/Image_Format
+    - https://www.khronos.org/opengl/wiki/GLAPI/glTexImage2D
+  - [x] PNG image spec
+    - https://tools.ietf.org/html/rfc2083
+- [@] render onto non default framebuffer
+  - render texture onto imgui window
+    - [@] load static asset into texture
     - draw into texture
-- [ ] try https://github.com/ocornut/imgui/pull/2197
-- [ ] scene viewport
+    - ImTextureID
+- [ ] custom render inside of imgui window
+
+- [ ] simple scene viewport
 
 - scene property editor
 
 - define rendering model
 
 - object/mesh picker
+
+
+# 2019/12/13
+
+- c++
+  - inline
+  - struct parameter
+
+- unity3d and c# scripting

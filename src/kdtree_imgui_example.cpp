@@ -6,10 +6,10 @@
 
 #include "window.hpp"
 #include "kdtree.hpp"
-#include "misc.hpp"
+#include "utils.hpp"
 
 using namespace toy;
-using namespace toy::misc;
+using namespace toy::utils;
 
 using Tree   = kdtree::Tree<std::string>;
 using Leaf   = kdtree::Leaf<std::string>;

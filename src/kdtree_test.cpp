@@ -1,8 +1,6 @@
-#include <gtest/gtest-death-test.h>
 #include <gtest/gtest.h>
 #include <fmt/format.h>
 #include "kdtree.hpp"
-#include "utils.hpp"
 
 using namespace toy::kdtree;
 
@@ -89,7 +87,7 @@ TEST(KDTreeTest, hitTestSeparator_Nested1) {
     {0.55, 0.55},
   };
   std::optional<std::pair<Branch*, float>> results[4];
-  for (auto i : toy::utils::range(4)) {
+  for (auto i = 0; i < 4; i++) {
     results[i] = root.hitTestSeparator(tests[i], hit_margin);
   }
 
@@ -132,7 +130,7 @@ TEST(KDTreeTest, hitTestSeparator_Nested2) {
   };
 
   std::optional<std::pair<Branch*, float>> results[6];
-  for (auto i : toy::utils::range(6)) {
+  for (auto i = 0; i < 6; i++) {
     results[i] = root.hitTestSeparator(tests[i], hit_margin);
   }
 
