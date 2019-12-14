@@ -17,7 +17,6 @@ struct StyleEditorPanel : Panel {
   void processUI() override {
     ImGui::ShowStyleEditor();
   }
-  void processMenu() override {}
 };
 
 struct MetricsPanel : Panel {
