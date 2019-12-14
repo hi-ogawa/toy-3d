@@ -60,4 +60,50 @@ TODO
 
 # 2019/12/14
 
-- toy-yaml
+- toy-3d
+  - [x] panel system
+    - [x] show main menu via PanelManager
+    - [x] add/split/remove panel
+    - [x] resize panels
+    - [x] show base panel menu
+    - [x] consider panel interface
+  - simple 3d viewport
+
+- git
+  - undo merge and rebase (example: https://github.com/ocornut/imgui/pull/2197)
+  - `git log --graph --oneline master HEAD`
+  - `git rebase feature-before-merge`
+  - `git rebase master` (or --interactive variant)
+
+```
+* master
+*
+| * feature-done (HEAD)
+| * feature-merged
+| |\
+| | * feature-before-merge
+| | * feature-started-2
+| |/
+|/|
+* |
+* |
+| * master-old-more
+| * feature-started-1
+|/
+* branch-point1
+*
+
+==>
+
+* feature-done
+* feature-more
+* feature-started-2
+* feature-started-1
+| * master
+| *
+| *
+| *
+|/
+* branch-point1
+*
+```
