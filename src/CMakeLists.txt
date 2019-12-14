@@ -7,6 +7,7 @@ link_libraries(glfw gl3w imgui fmt stb)
 add_executable(main main.cpp)
 
 add_executable(kdtree_imgui_example kdtree_imgui_example.cpp)
+add_executable(panel_system_example panel_system_example.cpp)
 
 add_executable(imgui_texture_example imgui_texture_example.cpp)
 

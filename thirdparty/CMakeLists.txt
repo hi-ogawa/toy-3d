@@ -44,6 +44,7 @@ set(IMGUI_SRCS
 set(IMGUI_INCLUDE_DIRS
   ${IMGUI_DIR} # imgui.h, imgui_internal.h
   ${IMGUI_DIR}/examples # imgui_impl_glfw.h, imgui_impl_opengl3.h
+  ${IMGUI_DIR}/misc/cpp # imgui_scoped.h
 )
 set(IMGUI_EXAMPLE_SRCS ${IMGUI_DIR}/examples/example_glfw_opengl3/main.cpp)
 add_library(imgui ${IMGUI_SRCS})

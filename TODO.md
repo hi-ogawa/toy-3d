@@ -30,6 +30,13 @@ TODO
   - render texture onto imgui window
 
 - [@] simple scene viewport
+  - yocto/gl
+    - scene data structure
+    - gltf loader
+  - load yocto's test scene
+    - integrate yocto library (scene struct, loader etc...)
+  - draw scene with simpler shaders
+    - component based "mesh", "material" system?
 
 - scene property editor
 
@@ -50,3 +57,7 @@ TODO
 
 - unity3d and c# scripting
   - mesh generation
+
+# 2019/12/14
+
+- toy-yaml
