@@ -23,6 +23,8 @@ struct Panel {
   virtual ~Panel() {}
 
   // TODO: consider interface (what should be the argument)
+  // - size, offset of panel wrt whole window
+  // - arbitrary app state
   virtual void processUI() {}
   virtual void processMenu() {}
 };
@@ -31,7 +33,7 @@ struct DefaultPanel : Panel {
   static inline std::string panel_type_ = "Default Panel";
 
   void processUI() override {
-    ImGui::Text("-- Default Panel Content --");
+    ImGui::Text("-- Example Panel Content --");
   }
 };
 
@@ -40,7 +42,7 @@ struct PanelManager {
   using PanelId = std::string;
   using Tree = kdtree::Tree<PanelId>;
   using Leaf = kdtree::Leaf<PanelId>;
-  using Branch = kdtree::Leaf<PanelId>;
+  using Branch = kdtree::Branch<PanelId>;
   using Root = kdtree::Root<PanelId>;
   using Command = std::function<void()>;
   Root layout_;
@@ -56,6 +58,17 @@ struct PanelManager {
 
   ivec2 content_offset_;
   ivec2 content_size_;
+
+  struct ResizeContext {
+    // Resize UI rules (cf. _processResize):
+    // - false => true : MouseClicked[0] and hiTestSeparator true
+    // - true => false : !MouseDown[0] anytime
+    // - show resize cursor : resizing or hiTestSeparator true
+    bool resizing = false;
+    Branch* branch;
+  };
+  ResizeContext resize_context_;
+
 
   PanelManager(Window& window) : window_{window} {
     registerPanelType(
@@ -91,8 +104,10 @@ struct PanelManager {
     return leaf;
   }
 
-  void addPanelToRoot(kdtree::SplitType split_type = kdtree::SplitType::HORIZONTAL) {
-    layout_.insertRoot(_newLeaf(), split_type, 0.5, kdtree::ChildIndex::SECOND);
+  void addPanelToRoot(
+      kdtree::SplitType split_type = kdtree::SplitType::HORIZONTAL,
+      const PanelTypeId& panel_type = DefaultPanel::panel_type_) {
+    layout_.insertRoot(_newLeaf(panel_type), split_type, 0.5, kdtree::ChildIndex::SECOND);
   }
 
   void changePanelType(const PanelId& id, PanelTypeId panel_type) {
@@ -140,8 +155,7 @@ struct PanelManager {
 
   void processPanelMenu(Panel& panel) {
     if (auto _ = ImScoped::MenuBar()) {
-      auto menu_label = fmt::format("{} ({})", panel.name_, panel.id_);
-      if (auto _ = ImScoped::Menu(menu_label.data())) {
+      if (auto _ = ImScoped::Menu(panel.name_.data())) {
         if (auto _ = ImScoped::Menu("Split")) {
           if (ImGui::MenuItem("Horizontal")) {
             _addCommand([&]() {
@@ -172,9 +186,16 @@ struct PanelManager {
     ivec2 input = fromImVec2<int>(window_.io_->MousePos);
     ivec2 hit_margin = {10, 10};
     auto result = layout_.hitTestSeparator(input - content_offset_, hit_margin, content_size_);
-    if (result) {
-      auto [hit_branch, new_fraction] = *result;
-      switch (hit_branch->split_type_) {
+
+    if (!window_.io_->MouseDown[0]) {
+      resize_context_.resizing = false;
+    }
+
+    if (resize_context_.resizing || result) {
+      Branch* branch;
+      if (resize_context_.resizing) branch = resize_context_.branch;
+      if (result)                   branch = result->first;
+      switch (branch->split_type_) {
         case kdtree::SplitType::HORIZONTAL : {
           ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
           break;
@@ -184,9 +205,24 @@ struct PanelManager {
           break;
         }
       }
-      if (window_.io_->MouseDown[0]) {
-        hit_branch->fraction_ = new_fraction;
+    }
+
+    if (resize_context_.resizing) {
+      auto branchRect = layout_.getTreeRect(content_size_, [&](Tree& tree) {
+        auto branch = dynamic_cast<Branch*>(&tree);
+        return branch && branch == resize_context_.branch;
+      });
+      assert(branchRect);
+      auto [offset, size] = *branchRect;
+      auto i = (int)resize_context_.branch->split_type_;
+      auto new_fraction = (input - content_offset_ - offset)[i] / (float)size[i];
+      if (0.05 < new_fraction && new_fraction < 0.95) {
+        resize_context_.branch->fraction_ = new_fraction;
       }
+
+    } else if (window_.io_->MouseClicked[0] && result) {
+      resize_context_.resizing = true;
+      resize_context_.branch = result->first;
     }
   }
 

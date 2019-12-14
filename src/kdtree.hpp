@@ -11,8 +11,8 @@ namespace kdtree {
 using glm::fvec2, glm::ivec2;
 
 enum struct SplitType {
-  HORIZONTAL,
-  VERTICAL,
+  HORIZONTAL = 0,
+  VERTICAL = 1,
 };
 
 enum struct ChildIndex {
@@ -42,6 +42,9 @@ struct Tree {
 
   using iter_func_t = const std::function<void(Leaf<T>& /*leaf*/, ivec2 /*offset*/, ivec2 /*size*/)>;
   virtual void forEachLeaf(ivec2 /*offset*/, ivec2 /*size*/, iter_func_t&) = 0;
+
+  using iter_func2_t = const std::function<void(Tree* /*tree*/, ivec2 /*offset*/, ivec2 /*size*/)>;
+  virtual void forEachTree(ivec2 /*offset*/, ivec2 /*size*/, iter_func2_t&) = 0;
 
   // overriden only by `Branch`
   using predicate_t = const std::function<bool(Tree&)>;
@@ -81,6 +84,9 @@ struct Leaf : Tree<T> {
   }
   void forEachLeaf(ivec2 offset, ivec2 size, typename Tree<T>::iter_func_t& iter_func) override {
     iter_func(*this, offset, size);
+  }
+  void forEachTree(ivec2 offset, ivec2 size, typename Tree<T>::iter_func2_t& iter_func) override {
+    iter_func(dynamic_cast<Tree<T>*>(this), offset, size);
   }
 };
 
@@ -131,17 +137,32 @@ struct Branch : Tree<T> {
     return next_tree->hitTestSeparator(next_input, next_hit_margin);
   }
 
-  void forEachLeaf(ivec2 offset, ivec2 size, typename Tree<T>::iter_func_t& iter_func) override {
+  void _computeChildrenRects(
+      ivec2& offset, ivec2& offset0, ivec2& offset1,
+      ivec2& size,   ivec2& size0,   ivec2& size1) {
     int index = split_type_ == SplitType::HORIZONTAL ? 0 : 1;
-    ivec2 first_size  = size;
-    ivec2 second_size = size;
-    ivec2 first_offset = offset;
-    ivec2 second_offset = offset;
-    first_size[index] = size[index] * fraction_;
-    second_size[index] = size[index] - first_size[index];
-    second_offset[index] = offset[index] + first_size[index];
-    children_[0]->forEachLeaf(first_offset, first_size, iter_func);
-    children_[1]->forEachLeaf(second_offset, second_size, iter_func);
+    size0 = size;
+    size1 = size;
+    offset0 = offset;
+    offset1 = offset;
+    size0[index] = size[index] * fraction_;
+    size1[index] = size[index] - size0[index];
+    offset1[index] = offset[index] + size0[index];
+  }
+
+  void forEachLeaf(ivec2 offset, ivec2 size, typename Tree<T>::iter_func_t& iter_func) override {
+    ivec2 offset0, offset1, size0, size1;
+    _computeChildrenRects(offset, offset0, offset1, size, size0, size1);
+    children_[0]->forEachLeaf(offset0, size0, iter_func);
+    children_[1]->forEachLeaf(offset1, size1, iter_func);
+  }
+
+  void forEachTree(ivec2 offset, ivec2 size, typename Tree<T>::iter_func2_t& iter_func) override {
+    iter_func(dynamic_cast<Tree<T>*>(this), offset, size);
+    ivec2 offset0, offset1, size0, size1;
+    _computeChildrenRects(offset, offset0, offset1, size, size0, size1);
+    children_[0]->forEachTree(offset0, size0, iter_func);
+    children_[1]->forEachTree(offset1, size1, iter_func);
   }
 
   bool insertNextTo(
@@ -199,6 +220,7 @@ struct Root {
     return root_->hitTestSeparator(n_input, n_hit_margin);
   }
 
+  // Example of how hitTestSeparator's result can be used to implemente resize
   std::optional<std::pair<Branch<T>*, float>> applyResize(ivec2 input, ivec2 hit_margin, ivec2 size) {
     auto result = hitTestSeparator(input, hit_margin, size);
     if (!result) return {};
@@ -245,6 +267,20 @@ struct Root {
   void forEachLeaf(ivec2 size, typename Tree<T>::iter_func_t& iter_func) {
     if (!root_) return;
     root_->forEachLeaf({0, 0}, size, iter_func);
+  }
+
+  void forEachTree(ivec2 size, typename Tree<T>::iter_func2_t& iter_func) {
+    if (!root_) return;
+    root_->forEachTree({0, 0}, size, iter_func);
+  }
+
+  std::optional<std::tuple<ivec2, ivec2>> getTreeRect(ivec2 size, typename Tree<T>::predicate_t& pred) {
+    std::optional<std::tuple<ivec2, ivec2>> result;
+    auto iter_func = [&](Tree<T>* tree, ivec2 offset, ivec2 size) {
+      if (pred(*tree)) result = std::make_tuple(offset, size);
+    };
+    forEachTree(size, iter_func);
+    return result;
   }
 
 };

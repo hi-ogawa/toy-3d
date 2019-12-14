@@ -242,3 +242,69 @@ leaf_id = 3, offset = (55, 85), size = (60, 120)
     EXPECT_EQ(result2, expected2);
   }
 }
+
+TEST(KDTreeTest, forEachTree) {
+  using Tree = Tree<int>; using Leaf = Leaf<int>; using Branch = Branch<int>; using Root = Root<int>;
+
+  {
+    // +-----+--------+
+    // |     |        | 0.4
+    // |     |--------|
+    // |     |        | 0.6
+    // |     |        |
+    // +-----+--------+
+    //   0.4    0.6
+
+    Branch root{SplitType::HORIZONTAL, 0.4,
+        new Leaf{1},
+        new Branch{SplitType::VERTICAL, 0.4,
+              new Leaf{2},
+              new Leaf{3}}};
+
+    std::string result1 = "\n";
+    std::string expected1 = R"(
+offset = (0, 0), size = (100, 200), split_type = 0
+offset = (0, 0), size = (40, 200), leaf_id = 1
+offset = (40, 0), size = (60, 200), split_type = 1
+offset = (40, 0), size = (60, 80), leaf_id = 2
+offset = (40, 80), size = (60, 120), leaf_id = 3
+)";
+
+    std::string result2 = "\n";
+    std::string expected2 = R"(
+offset = (15, 5), size = (100, 200), split_type = 0
+offset = (15, 5), size = (40, 200), leaf_id = 1
+offset = (55, 5), size = (60, 200), split_type = 1
+offset = (55, 5), size = (60, 80), leaf_id = 2
+offset = (55, 85), size = (60, 120), leaf_id = 3
+)";
+
+    root.forEachTree({0, 0}, {100, 200}, [&](Tree* tree, ivec2 offset, ivec2 size) {
+      auto branch = dynamic_cast<Branch*>(tree);
+      auto leaf = dynamic_cast<Leaf*>(tree);
+      if (branch) {
+        result1 += fmt::format("offset = ({}, {}), size = ({}, {}), split_type = {}\n",
+            offset[0], offset[1], size[0], size[1], branch->split_type_);
+      }
+      if (leaf) {
+        result1 += fmt::format("offset = ({}, {}), size = ({}, {}), leaf_id = {}\n",
+            offset[0], offset[1], size[0], size[1], leaf->value_);
+      }
+    });
+    EXPECT_EQ(result1, expected1);
+
+    root.forEachTree({15, 5}, {100, 200}, [&](Tree* tree, ivec2 offset, ivec2 size) {
+      auto branch = dynamic_cast<Branch*>(tree);
+      auto leaf = dynamic_cast<Leaf*>(tree);
+      if (branch) {
+        result2 += fmt::format("offset = ({}, {}), size = ({}, {}), split_type = {}\n",
+            offset[0], offset[1], size[0], size[1], branch->split_type_);
+      }
+      if (leaf) {
+        result2 += fmt::format("offset = ({}, {}), size = ({}, {}), leaf_id = {}\n",
+            offset[0], offset[1], size[0], size[1], leaf->value_);
+      }
+    });
+    EXPECT_EQ(result2, expected2);
+  }
+}

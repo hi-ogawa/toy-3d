@@ -36,7 +36,9 @@ struct App {
     panel_manager_.reset(new PanelManager{*window_});
     panel_manager_->registerPanelType("Style Editor", [](){ return new StyleEditorPanel; });
     panel_manager_->registerPanelType("Metrics", [](){ return new MetricsPanel; });
-    panel_manager_->addPanelToRoot();
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, DefaultPanel::panel_type_);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, "Style Editor");
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, "Metrics");
   }
 
   void processMainMenuBar() {

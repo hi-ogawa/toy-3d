@@ -67,7 +67,8 @@ TODO
     - [x] resize panels
     - [x] show base panel menu
     - [x] consider panel interface
-  - simple 3d viewport
+    - [x] better resize interaction
+  - [@] simple 3d viewport
 
 - git
   - undo merge and rebase (example: https://github.com/ocornut/imgui/pull/2197)
