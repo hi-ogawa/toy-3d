@@ -3,6 +3,7 @@
 #include <fmt/format.h>
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <imgui_scoped.h>
 
 #include "window.hpp"
 #include "kdtree.hpp"
@@ -101,8 +102,8 @@ struct App {
 };
 
 void App::processMainMenuBar() {
-  if (ImGui::BeginMainMenuBar()) {
-    if (ImGui::BeginMenu("Menu")) {
+  if (auto _ = ImScoped::MainMenuBar()) {
+    if (auto _ = ImScoped::Menu("Menu")) {
       if (panel_manager_.empty()) {
         if (ImGui::MenuItem("Add Panel")) {
           commands_.emplace_back([&]() {
@@ -110,7 +111,7 @@ void App::processMainMenuBar() {
           });
         };
       } else {
-        if (ImGui::BeginMenu("Add panel")) {
+        if (auto _ = ImScoped::Menu("Add panel")) {
           if (ImGui::MenuItem("Horizontal")) {
             commands_.emplace_back([&]() {
               panel_manager_.addToRoot(kdtree::SplitType::HORIZONTAL);
@@ -121,23 +122,20 @@ void App::processMainMenuBar() {
               panel_manager_.addToRoot(kdtree::SplitType::VERTICAL);
             });
           }
-          ImGui::EndMenu();
         }
       }
       if (ImGui::MenuItem("Quit")) {
         done_ = true;
       };
-      ImGui::EndMenu();
     }
-    ImGui::EndMainMenuBar();
   }
 }
 
 void App::processPanel(Leaf& leaf) {
   auto name = leaf.value_.data();
-  if (ImGui::BeginMenuBar()) {
-    if (ImGui::BeginMenu(name)) {
-      if (ImGui::BeginMenu("Split")) {
+  if (auto _ = ImScoped::MenuBar()) {
+    if (auto _ = ImScoped::Menu(name)) {
+      if (auto _ = ImScoped::Menu("Split")) {
         if (ImGui::MenuItem("Horizontal")) {
           commands_.emplace_back([&]() {
             panel_manager_.splitNewNextToId(leaf.value_, kdtree::SplitType::HORIZONTAL);
@@ -148,16 +146,13 @@ void App::processPanel(Leaf& leaf) {
             panel_manager_.splitNewNextToId(leaf.value_, kdtree::SplitType::VERTICAL);
           });
         }
-        ImGui::EndMenu();
       }
       if (ImGui::MenuItem("Close")) {
         commands_.emplace_back([&]() {
           panel_manager_.removeById(leaf.value_);
         });
       }
-      ImGui::EndMenu();
     }
-    ImGui::EndMenuBar();
   }
   ImGui::Text("-- Panel Content Here --");
 }
@@ -198,10 +193,9 @@ void App::processPanels() {
     ImGui::SetNextWindowSize(_size);
     auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoResize;
     auto name = leaf.value_.data();
-    ImGui::Begin(name, nullptr, flags);
-      // "Panel" only deal with content of ImGui window.
+    if (auto _ = ImScoped::Window(name, nullptr, flags)) {
       processPanel(leaf);
-      ImGui::End();
+    }
   });
 }
 
