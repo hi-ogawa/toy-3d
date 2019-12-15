@@ -2,6 +2,7 @@
 
 // Cli
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <optional>
@@ -88,7 +89,8 @@ glm::fvec4 inline RGBtoHSL(glm::fvec4 c) {
 
 //
 // NOTE:
-// c[sort[0]], c[sort[1]], c[sort[2]] --> s, dh, l
+// Linear transf. (invertible)
+// - c[sort[0]], c[sort[1]], c[sort[2]] |-> s, dh, l
 // [   1    0   -1 ]
 // [   0    1   -1 ]
 // [ 1/3  1/3  1/3 ]
@@ -170,7 +172,7 @@ namespace gl {
   std::pair<bool, std::string> checkProgram(GLuint handle) {
     std::string log;
     GLint status = 0, log_length = 0;
-    glGetProgramiv(handle, GL_COMPILE_STATUS, &status);
+    glGetProgramiv(handle, GL_LINK_STATUS, &status);
     glGetProgramiv(handle, GL_INFO_LOG_LENGTH, &log_length);
     if (log_length > 0) {
       log.resize(log_length);
@@ -178,6 +180,43 @@ namespace gl {
     }
     return make_pair(status == GL_TRUE, log);
   }
+
+  struct Program {
+    GLuint handle_, vertex_shader_, fragment_shader_,  vertex_array_;
+    Program(const char* vs_src, const char* fs_src) {
+      glGenVertexArrays(1, &vertex_array_);
+      vertex_shader_ = glCreateShader(GL_VERTEX_SHADER);
+      fragment_shader_ = glCreateShader(GL_FRAGMENT_SHADER);
+      handle_ = glCreateProgram();
+
+      glShaderSource(vertex_shader_, 1, &vs_src, nullptr);
+      glCompileShader(vertex_shader_);
+      if (auto result = checkShader(vertex_shader_); !result.first) {
+        throw std::runtime_error{"== glCompileShader(vertex_shader_) faild. ==\n" + result.second};
+      }
+
+      glShaderSource(fragment_shader_, 1, &fs_src, nullptr);
+      glCompileShader(fragment_shader_);
+      if (auto result = checkShader(fragment_shader_); !result.first) {
+        throw std::runtime_error{"== glCompileShader(fragment_shader_) faild. ==\n" + result.second};
+      }
+
+      glAttachShader(handle_, vertex_shader_);
+      glAttachShader(handle_, fragment_shader_);
+      glLinkProgram(handle_);
+      if (auto result = checkProgram(handle_); !result.first) {
+        throw std::runtime_error{"== glLinkProgram(handle_) faild. ==\n" + result.second};
+      }
+    }
+    ~Program() {
+      glDeleteVertexArrays(1, &vertex_array_);
+      glDetachShader(handle_, vertex_shader_);
+      glDetachShader(handle_, fragment_shader_);
+      glDeleteShader(vertex_shader_);
+      glDeleteShader(fragment_shader_);
+      glDeleteProgram(handle_);
+    }
+  };
 }
 
 

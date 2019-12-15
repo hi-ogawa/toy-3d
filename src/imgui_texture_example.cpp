@@ -76,52 +76,23 @@ void main() {
 }
 )";
   static inline GLuint
-      vertex_shader_, fragment_shader_,  program_,
       array_buffer_, element_array_buffer_,
-      vertex_array_,
       uniform_location_projection_, uniform_location_texture_;
 
+  static inline std::unique_ptr<utils::gl::Program> program_;
+
   static void createGLObjects() {
-    vertex_shader_ = glCreateShader(GL_VERTEX_SHADER);
-    fragment_shader_ = glCreateShader(GL_FRAGMENT_SHADER);
-    program_ = glCreateProgram();
     glGenBuffers(1, &array_buffer_);
     glGenBuffers(1, &element_array_buffer_);
-    glGenVertexArrays(1, &vertex_array_);
-
-    glShaderSource(vertex_shader_, 1, &vertex_shader_source, nullptr);
-    glCompileShader(vertex_shader_);
-    {
-      auto result = utils::gl::checkShader(vertex_shader_);
-      if (!result.first) fmt::print("== glCompileShader(vertex_shader_) failed: {}", result.second);
-      assert(result.first);
-    }
-
-    glShaderSource(fragment_shader_, 1, &fragment_shader_source, nullptr);
-    glCompileShader(fragment_shader_);
-    {
-      auto result = utils::gl::checkShader(fragment_shader_);
-      if (!result.first) fmt::print("== glCompileShader(fragment_shader_) failed: {}", result.second);
-      assert(result.first);
-    }
-
-    glAttachShader(program_, vertex_shader_);
-    glAttachShader(program_, fragment_shader_);
-    glLinkProgram(program_);
-
-    uniform_location_projection_ = glGetUniformLocation(program_, "projection_");
-    uniform_location_texture_ = glGetUniformLocation(program_, "texture_");
+    program_.reset(new utils::gl::Program{vertex_shader_source, fragment_shader_source});
+    uniform_location_projection_ = glGetUniformLocation(program_->handle_, "projection_");
+    uniform_location_texture_ = glGetUniformLocation(program_->handle_, "texture_");
   }
 
   static void destroyGLObjects() {
-    glDeleteVertexArrays(1, &vertex_array_);
     glDeleteBuffers(1, &array_buffer_);
     glDeleteBuffers(1, &element_array_buffer_);
-    glDetachShader(program_, vertex_shader_);
-    glDetachShader(program_, fragment_shader_);
-    glDeleteShader(vertex_shader_);
-    glDeleteShader(fragment_shader_);
-    glDeleteProgram(program_);
+    program_.reset(nullptr);
   }
 
   void draw(ivec2 viewport_size, ivec2 offset, ivec2 size) {
@@ -147,12 +118,12 @@ void main() {
     glDisable(GL_DEPTH_TEST);
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-    glUseProgram(program_);
+    glUseProgram(program_->handle_);
     glUniform1i(uniform_location_texture_, 0);
     glUniformMatrix4fv(uniform_location_projection_, 1, GL_FALSE, (GLfloat*)&projection[0][0]);
     glActiveTexture(GL_TEXTURE0);
 
-    glBindVertexArray(vertex_array_);
+    glBindVertexArray(program_->vertex_array_);
     glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
     glEnableVertexAttribArray(0);
