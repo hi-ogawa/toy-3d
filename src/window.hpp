@@ -109,12 +109,14 @@ struct Window {
 
     auto convert = utils::fromImVec2<int>;
     ivec2 size = convert(io_->DisplaySize) * convert(io_->DisplayFramebufferScale);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, size[0], size[1]);
     glClearColor(0, 0, 0, 1);
     glClear(GL_COLOR_BUFFER_BIT);
   }
 
   void render() {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     glfwSwapBuffers(glfw_window_);

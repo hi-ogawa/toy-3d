@@ -9,6 +9,8 @@ add_executable(main main.cpp)
 add_executable(kdtree_imgui_example kdtree_imgui_example.cpp)
 add_executable(panel_system_example panel_system_example.cpp)
 
+add_executable(simple_render_example simple_render_example.cpp)
+
 add_executable(imgui_texture_example imgui_texture_example.cpp)
 
 add_executable(imgui_framebuffer_example imgui_framebuffer_example.cpp)

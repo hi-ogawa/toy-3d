@@ -238,19 +238,17 @@ struct Cli {
   std::vector<std::string> boolean_flags_;
 
   std::string help() {
-    std::string _template = "Usage: <program> {} {} {}\n";
     auto join = [](const std::vector<std::string>& v) {
       std::string result;
       for (auto i : range(v.size())) {
-        if (i >= 1) result += " ";
-        result += v[i];
+        result += " " + v[i];
       }
       return result;
     };
     return fmt::format(
-        _template,
+        "Usage: <program>{}{}{}\n",
         join(boolean_flags_), join(value_flags_),
-        has_positional_arg_ ? "<arg-0> <arg-1> ..." : "");
+        has_positional_arg_ ? " <arg-0> <arg-1> ..." : "");
   }
 
   template<typename T>

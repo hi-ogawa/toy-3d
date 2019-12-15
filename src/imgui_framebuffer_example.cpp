@@ -28,8 +28,6 @@ struct Framebuffer {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, handle_);
     glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture_, 0);
     glDrawBuffer(GL_COLOR_ATTACHMENT0);
-
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // reset to 0 aka. default framebuffer
   }
 
   ~Framebuffer() {
@@ -43,7 +41,6 @@ struct Framebuffer {
     auto c = utils::HSLtoRGB({std::fmod(glfwGetTime() / 6, 1), 1, 0.5, 1});
     glClearColor(c.x, c.y, c.z, c.w);
     glClear(GL_COLOR_BUFFER_BIT);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
   }
 };
 
