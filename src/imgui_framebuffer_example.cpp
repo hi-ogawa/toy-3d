@@ -37,7 +37,7 @@ struct Framebuffer {
 
   void draw() {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, handle_);
-    glViewport(0, 0, size_[0], size_[1]);
+    glViewport(0, 0, size_.x, size_.y);
     auto c = utils::HSLtoRGB({std::fmod(glfwGetTime() / 6, 1), 1, 0.5, 1});
     glClearColor(c.x, c.y, c.z, c.w);
     glClear(GL_COLOR_BUFFER_BIT);

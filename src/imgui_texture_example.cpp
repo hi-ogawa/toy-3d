@@ -76,7 +76,7 @@ void main() {
 }
 )";
   static inline GLuint
-      array_buffer_, element_array_buffer_,
+      array_buffer_, element_array_buffer_, vertex_array_,
       uniform_location_projection_, uniform_location_texture_;
 
   static inline std::unique_ptr<utils::gl::Program> program_;
@@ -84,14 +84,32 @@ void main() {
   static void createGLObjects() {
     glGenBuffers(1, &array_buffer_);
     glGenBuffers(1, &element_array_buffer_);
+    glGenVertexArrays(1, &vertex_array_);
     program_.reset(new utils::gl::Program{vertex_shader_source, fragment_shader_source});
     uniform_location_projection_ = glGetUniformLocation(program_->handle_, "projection_");
     uniform_location_texture_ = glGetUniformLocation(program_->handle_, "texture_");
+
+    // Configure vertex format once and for all
+    glBindVertexArray(vertex_array_);
+    glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
+    auto position_index_ = glGetAttribLocation(program_->handle_, "position_");
+    auto uv_index_ = glGetAttribLocation(program_->handle_, "uv_");
+    glEnableVertexAttribArray(position_index_);
+    glEnableVertexAttribArray(uv_index_);
+    glVertexAttribPointer(position_index_, 2, GL_FLOAT, GL_FALSE, (sizeof array_buffer_data_[0]) * 2, 0);
+    glVertexAttribPointer(uv_index_,       2, GL_FLOAT, GL_FALSE, (sizeof array_buffer_data_[0]) * 2, 0);
+
+    // Initialize data once and for all
+    glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
+    glBufferData(GL_ARRAY_BUFFER, (sizeof array_buffer_data_), array_buffer_data_, GL_STREAM_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (sizeof element_array_buffer_data_), element_array_buffer_data_, GL_STREAM_DRAW);
   }
 
   static void destroyGLObjects() {
     glDeleteBuffers(1, &array_buffer_);
     glDeleteBuffers(1, &element_array_buffer_);
+    glDeleteVertexArrays(1, &vertex_array_);
     program_.reset(nullptr);
   }
 
@@ -111,6 +129,7 @@ void main() {
     };
     glm::fmat4x4 projection  = viewport_projection * quad_transform;
 
+    glViewport(0, 0, vp.x, vp.y);
     glEnable(GL_BLEND);
     glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -120,19 +139,12 @@ void main() {
 
     glUseProgram(program_->handle_);
     glUniform1i(uniform_location_texture_, 0);
-    glUniformMatrix4fv(uniform_location_projection_, 1, GL_FALSE, (GLfloat*)&projection[0][0]);
+    glUniformMatrix4fv(uniform_location_projection_, 1, GL_FALSE, (GLfloat*)&projection);
     glActiveTexture(GL_TEXTURE0);
 
-    glBindVertexArray(program_->vertex_array_);
+    glBindVertexArray(vertex_array_);
     glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, (sizeof array_buffer_data_[0]) * 2, 0);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, (sizeof array_buffer_data_[0]) * 2, 0);
-
-    glBufferData(GL_ARRAY_BUFFER, (sizeof array_buffer_data_), array_buffer_data_, GL_STREAM_DRAW);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (sizeof element_array_buffer_data_), element_array_buffer_data_, GL_STREAM_DRAW);
     glBindTexture(GL_TEXTURE_2D, handle_);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, 0);
   }

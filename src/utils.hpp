@@ -182,9 +182,8 @@ namespace gl {
   }
 
   struct Program {
-    GLuint handle_, vertex_shader_, fragment_shader_,  vertex_array_;
+    GLuint handle_, vertex_shader_, fragment_shader_;
     Program(const char* vs_src, const char* fs_src) {
-      glGenVertexArrays(1, &vertex_array_);
       vertex_shader_ = glCreateShader(GL_VERTEX_SHADER);
       fragment_shader_ = glCreateShader(GL_FRAGMENT_SHADER);
       handle_ = glCreateProgram();
@@ -209,7 +208,6 @@ namespace gl {
       }
     }
     ~Program() {
-      glDeleteVertexArrays(1, &vertex_array_);
       glDetachShader(handle_, vertex_shader_);
       glDetachShader(handle_, fragment_shader_);
       glDeleteShader(vertex_shader_);
