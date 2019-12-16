@@ -36,7 +36,7 @@
 //
 // format glm::fmat4x4
 //
-std::ostream &operator<<(std::ostream& os, const glm::fmat4x4& A) {
+std::ostream& operator<<(std::ostream& os, const glm::fmat4& A) {
   auto _A = reinterpret_cast<const float*>(&A[0][0]);
   os << "{ ";
   for (auto i = 0; i < 16; i++) {
@@ -54,6 +54,21 @@ std::ostream &operator<<(std::ostream& os, const glm::fmat4x4& A) {
 
 
 namespace toy { namespace utils {
+
+//
+// inverse of group SO(3) x R^3 (aka "transform")
+//
+
+glm::fmat4 inverse(const glm::fmat4& F) {
+  using namespace glm;
+  fmat3 A{F};
+  fvec3 b{F[3]};
+  auto AT = transpose(A); // i.e. inverse
+  auto c = - AT * b;
+  fmat4 G{AT};
+  G[3] = fvec4{c, 1};
+  return G;
+}
 
 //
 // hsl <--> rgb \in [0, 1]^3
@@ -213,6 +228,20 @@ namespace gl {
       glDeleteShader(vertex_shader_);
       glDeleteShader(fragment_shader_);
       glDeleteProgram(handle_);
+    }
+
+    void setUniform(const char* name, const glm::fmat4& value) {
+      auto location = glGetUniformLocation(handle_, name);
+      if (location == -1)
+        throw std::runtime_error{fmt::format("== Uniform ({}) not found ==", name)};
+      glUniformMatrix4fv(location, 1, GL_FALSE, (GLfloat*)&value);
+    }
+
+    void setUniform(const char* name, GLint value) {
+      auto location = glGetUniformLocation(handle_, name);
+      if (location == -1)
+        throw std::runtime_error{fmt::format("== Uniform ({}) not found ==", name)};
+      glUniform1i(location, value);
     }
   };
 }
