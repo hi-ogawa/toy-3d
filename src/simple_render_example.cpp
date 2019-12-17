@@ -58,6 +58,7 @@ using glm::ivec2, glm::fvec2;
 
 
 struct SimpleRenderer {
+  // Only used in ImGui property editor
   struct Rotation {
     glm::fvec3 data_;
     glm::fmat3 ExtrinsicEulerXYZ_to_SO3() {
@@ -80,16 +81,6 @@ struct SimpleRenderer {
           0,   0,   1,
       };
       return Rz * Ry * Rx;
-    }
-  };
-
-  struct Transform {
-    glm::fvec3 scale_ = {1, 1, 1};
-    glm::fvec3 translation_ = {0, 0, 0};
-    Rotation rotation_ = { glm::fvec3{0, 0, 0} };
-    glm::fmat4 getMatrix() {
-      // TODO
-      return {};
     }
   };
 
@@ -131,12 +122,6 @@ struct SimpleRenderer {
     }
   };
   std::unique_ptr<Camera> camera_;
-
-  struct Material {
-    // TODO:
-    // https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#metallic-roughness-material
-  };
-  std::unique_ptr<Material> material_;
 
   struct VertexData {
     glm::fvec3 position;
@@ -214,51 +199,6 @@ struct SimpleRenderer {
     }
   };
 
-  struct MeshRenderer {
-    TOY_CLASS_DELETE_COPY(MeshRenderer)
-    GLuint array_buffer_, element_array_buffer_, vertex_array_;
-    const GLsizei num_elements_;
-
-    MeshRenderer(const Mesh& mesh, const utils::gl::Program& program)
-      : num_elements_{(GLsizei)mesh.indices_.size()} {
-      glGenBuffers(1, &array_buffer_);
-      glGenBuffers(1, &element_array_buffer_);
-      glGenVertexArrays(1, &vertex_array_);
-
-      // Setup data
-      glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
-      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
-      #define SIZEOF_VECTOR(VECTOR) VECTOR.size() * (sizeof VECTOR[0])
-      glBufferData(GL_ARRAY_BUFFER, SIZEOF_VECTOR(mesh.vertices_), mesh.vertices_.data(), GL_STREAM_DRAW);
-      glBufferData(GL_ELEMENT_ARRAY_BUFFER, SIZEOF_VECTOR(mesh.indices_), mesh.indices_.data(), GL_STREAM_DRAW);
-      #undef SIZEOF_VECTOR
-
-      // Configure vertex format
-      glBindVertexArray(vertex_array_);
-      glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
-      auto position_index_ = glGetAttribLocation(program.handle_, "vert_position_");
-      auto color_index_ = glGetAttribLocation(program.handle_, "vert_color_");
-      glEnableVertexAttribArray(position_index_);
-      glEnableVertexAttribArray(color_index_);
-      glVertexAttribPointer(position_index_, 3, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, position));
-      glVertexAttribPointer(color_index_,    4, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, color));
-    }
-
-    ~MeshRenderer() {
-      glDeleteBuffers(1, &array_buffer_);
-      glDeleteBuffers(1, &element_array_buffer_);
-      glDeleteVertexArrays(1, &vertex_array_);
-    }
-
-    void draw() {
-      glBindVertexArray(vertex_array_);
-      glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
-      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
-      glDrawElements(GL_TRIANGLES, num_elements_, GL_UNSIGNED_BYTE, 0);
-    }
-  };
-  std::unique_ptr<MeshRenderer> mesh_renderer_;
-
   struct Model {
     glm::fmat4 transform_ = glm::fmat4{1};
     Mesh mesh_;
@@ -266,47 +206,9 @@ struct SimpleRenderer {
   };
   std::unique_ptr<Model> model_;
 
-  struct Framebuffer {
-    TOY_CLASS_DELETE_COPY(Framebuffer)
-    GLuint framebuffer_handle_, texture_handle_, depth_texture_handle_;
-    ivec2 size_ = {0, 0};
-
-    Framebuffer() {
-      glGenFramebuffers(1, &framebuffer_handle_);
-      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer_handle_);
-
-      // color attachment
-      glGenTextures(1, &texture_handle_);
-      glBindTexture(GL_TEXTURE_2D, texture_handle_);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size_.x, size_.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture_handle_, 0);
-      glDrawBuffer(GL_COLOR_ATTACHMENT0);
-
-      // depth attachment
-      glGenTextures(1, &depth_texture_handle_);
-      glBindTexture(GL_TEXTURE_2D, depth_texture_handle_);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, size_.x, size_.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture_handle_, 0);
-    }
-    ~Framebuffer() {
-      glDeleteTextures(1, &depth_texture_handle_);
-      glDeleteTextures(1, &texture_handle_);
-      glDeleteFramebuffers(1, &framebuffer_handle_);
-    }
-
-    void setSize(const ivec2& size) {
-      size_ = size;
-      glBindTexture(GL_TEXTURE_2D, texture_handle_);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size_.x, size_.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-      glBindTexture(GL_TEXTURE_2D, depth_texture_handle_);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, size_.x, size_.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-    }
-  };
-  std::unique_ptr<Framebuffer> fb_;
-
   std::unique_ptr<utils::gl::Program> program_;
+  std::unique_ptr<utils::gl::Framebuffer> fb_;
+  std::unique_ptr<utils::gl::VertexRenderer> vertex_renderer_;
 
   constexpr static inline const char* vertex_shader_source = R"(
 #version 410
@@ -332,14 +234,25 @@ void main() {
 )";
 
   SimpleRenderer() {
-    fb_.reset(new Framebuffer);
+    // GL resource
     program_.reset(new utils::gl::Program{vertex_shader_source, fragment_shader_source});
-    model_.reset(new Model{Mesh::createCube()});
-    mesh_renderer_.reset(new MeshRenderer{model_->mesh_, *program_});
-    camera_.reset(new Camera);
+    fb_.reset(new utils::gl::Framebuffer);
+    vertex_renderer_.reset(new utils::gl::VertexRenderer);
 
-    // Default camera position
-    camera_->transform_[3] = glm::fvec4{-.7, 1.5, 4, 1};
+    // Scene data
+    model_.reset(new Model{Mesh::createCube()});
+    camera_.reset(new Camera);
+    camera_->transform_[3] = glm::fvec4{-.7, 1.5, 4, 1}; // Default camera position
+
+    // Setup GL data
+    vertex_renderer_->index_type_ = GL_UNSIGNED_BYTE;
+    vertex_renderer_->setData(model_->mesh_.vertices_, model_->mesh_.indices_);
+    vertex_renderer_->setFormat(
+        glGetAttribLocation(program_->handle_, "vert_position_"),
+        3, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, position));
+    vertex_renderer_->setFormat(
+        glGetAttribLocation(program_->handle_, "vert_color_"),
+        4, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, color));
   }
 
   void draw() {
@@ -369,7 +282,7 @@ void main() {
     program_->setUniform("view_projection_", camera_->getPerspectiveProjection());
 
     // draw
-    mesh_renderer_->draw();
+    vertex_renderer_->draw();
   }
 };
 

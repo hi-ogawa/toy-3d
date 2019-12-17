@@ -1,6 +1,7 @@
 #pragma once
 
 // Cli
+#include "GL/glcorearb.h"
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -69,6 +70,15 @@ glm::fmat4 inverse(const glm::fmat4& F) {
   G[3] = fvec4{c, 1};
   return G;
 }
+
+//
+// TODO: Mesh primitives
+//
+
+//
+//
+//
+
 
 //
 // hsl <--> rgb \in [0, 1]^3
@@ -242,6 +252,92 @@ namespace gl {
       if (location == -1)
         throw std::runtime_error{fmt::format("== Uniform ({}) not found ==", name)};
       glUniform1i(location, value);
+    }
+  };
+
+  struct Framebuffer {
+    TOY_CLASS_DELETE_COPY(Framebuffer)
+    GLuint framebuffer_handle_, texture_handle_, depth_texture_handle_;
+    glm::ivec2 size_ = {0, 0};
+
+    Framebuffer() {
+      glGenFramebuffers(1, &framebuffer_handle_);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer_handle_);
+
+      // color attachment
+      glGenTextures(1, &texture_handle_);
+      glBindTexture(GL_TEXTURE_2D, texture_handle_);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size_.x, size_.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture_handle_, 0);
+      glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
+      // depth attachment
+      glGenTextures(1, &depth_texture_handle_);
+      glBindTexture(GL_TEXTURE_2D, depth_texture_handle_);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, size_.x, size_.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture_handle_, 0);
+    }
+
+    ~Framebuffer() {
+      glDeleteTextures(1, &depth_texture_handle_);
+      glDeleteTextures(1, &texture_handle_);
+      glDeleteFramebuffers(1, &framebuffer_handle_);
+    }
+
+    void setSize(const glm::ivec2& size) {
+      size_ = size;
+      glBindTexture(GL_TEXTURE_2D, texture_handle_);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size_.x, size_.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      glBindTexture(GL_TEXTURE_2D, depth_texture_handle_);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, size_.x, size_.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    }
+  };
+
+  // Usable only for interleaved vertex buffer
+  struct VertexRenderer {
+    TOY_CLASS_DELETE_COPY(VertexRenderer)
+    GLuint vertex_array_, array_buffer_, element_array_buffer_;
+    GLenum primitive_mode_ = GL_TRIANGLES;
+    GLenum index_type_ = GL_UNSIGNED_SHORT;
+    GLsizei num_elements_;
+
+    VertexRenderer() {
+      glGenBuffers(1, &array_buffer_);
+      glGenBuffers(1, &element_array_buffer_);
+      glGenVertexArrays(1, &vertex_array_);
+    }
+
+    ~VertexRenderer() {
+      glDeleteBuffers(1, &array_buffer_);
+      glDeleteBuffers(1, &element_array_buffer_);
+      glDeleteVertexArrays(1, &vertex_array_);
+    }
+
+    template<typename T1, typename T2>
+    void setData(std::vector<T1> vertices, std::vector<T2> indices) {
+      glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
+      glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(T1), vertices.data(), GL_STREAM_DRAW);
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(T2), indices.data(), GL_STREAM_DRAW);
+      num_elements_ = indices.size();
+    }
+
+    void setFormat(
+        GLint location, GLint size, GLenum type,
+        GLboolean normalized, GLsizei stride, const void* pointer) {
+      glBindVertexArray(vertex_array_);
+      glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
+      glEnableVertexAttribArray(location);
+      glVertexAttribPointer(location, size, type, normalized, stride, pointer);
+    }
+
+    void draw() {
+      glBindVertexArray(vertex_array_);
+      glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
+      glDrawElements(GL_TRIANGLES, num_elements_, index_type_, 0);
     }
   };
 }
