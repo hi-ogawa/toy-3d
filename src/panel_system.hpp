@@ -2,6 +2,7 @@
 
 #include <string>
 #include <map>
+#include <variant>
 
 #include <fmt/format.h>
 #include <imgui.h>
@@ -27,9 +28,28 @@ struct Panel {
   ivec2 content_offset_;
   ivec2 content_size_;
 
+  // push/pop before/after ImGui::Begin of panel (useful for ImGuiStyleVar_WindowPadding)
+  std::vector<std::pair<ImGuiStyleVar, std::variant<float, ImVec2>>> style_vars_;
+
   virtual ~Panel() {}
   virtual void processUI() {}
   virtual void processMenu() {}
+
+  void _pushStyleVars() {
+    for (auto& [var, value] : style_vars_) {
+      if (std::holds_alternative<ImVec2>(value)) {
+        ImGui::PushStyleVar(var, std::get<ImVec2>(value));
+      } else {
+        ImGui::PushStyleVar(var, std::get<float>(value));
+      }
+    }
+  }
+
+  void _popStyleVars() {
+    for (auto& [var, value] : style_vars_) {
+      ImGui::PopStyleVar();
+    }
+  }
 };
 
 struct DefaultPanel : Panel {
@@ -238,23 +258,26 @@ struct PanelManager {
   }
 
   void _processPanels() {
-    auto g = window_.imgui_context_;
-    ivec2 offset_by_panel_menu = {0, g->FontBaseSize + g->Style.FramePadding.y * 2};
-    ivec2 window_padding = fromImVec2<int>(g->Style.WindowPadding);
-
     layout_.forEachLeaf(content_size_, [&](Leaf& leaf, ivec2 offset, ivec2 size) {
       ImVec2 _offset = toImVec2(offset + content_offset_);
       ImVec2 _size = toImVec2(size);
       ImGui::SetNextWindowPos(_offset);
       ImGui::SetNextWindowSize(_size);
-      auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
+      auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar |
+                   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                   ImGuiWindowFlags_HorizontalScrollbar;
       auto panelId = leaf.value_;
       auto& panel = panels_.at(panelId);
       panel->offset_ = offset;
       panel->size_ = size;
-      panel->content_offset_ = offset + offset_by_panel_menu + window_padding;
-      panel->content_size_ = size - panel->content_offset_ - window_padding;
+      panel->_pushStyleVars();
       if (auto _ = ImScoped::Window(panelId.data(), nullptr, flags)) {
+        panel->_popStyleVars();
+        // Directly probe ImGuiWindow about layout info
+        auto this_imgui_window = ImGui::GetCurrentWindowRead();
+        auto window_padding = fromImVec2<int>(this_imgui_window->WindowPadding);
+        panel->content_offset_ = ivec2{0, this_imgui_window->MenuBarHeight()} + window_padding;
+        panel->content_size_ = size - panel->content_offset_ - window_padding;
         processPanelMenu(*panel);
         panel->processUI();
       }
@@ -262,8 +285,8 @@ struct PanelManager {
   }
 
   void _setDefaultContentRect() {
-    auto g = window_.imgui_context_;
-    content_offset_ = {0, g->FontBaseSize + g->Style.FramePadding.y * 2};
+    auto main_menu_bar = ImGui::FindWindowByName("##MainMenuBar");
+    content_offset_ = {0, main_menu_bar ? main_menu_bar->Size.y : 0};
     content_size_ = fromImVec2<int>(window_.io_->DisplaySize) - content_offset_;
   }
 

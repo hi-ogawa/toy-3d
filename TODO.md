@@ -172,3 +172,6 @@ TODO
   - [x] change size of main menu
     - need to tell PanelManager real main menu's size
   - [x] panel content size
+
+- render offscreen for testing?
+  - only depends on glfw context creation?

@@ -47,8 +47,13 @@ using glm::ivec2, glm::fvec2;
 // [x] "transform" property editor
 //   - [x] imgui
 //   - [-] gizmo
-// [@] organize scene system
-//   - [@] immitate gltf data structure
+// [@] draw multiple meshes
+//   - std::vector<Node> models_ ??
+//   -
+// [ ] support simple mesh base color texture
+// [ ] draw mesh from gltf
+// [ ] organize scene system
+//   - [ ] immitate gltf data structure
 //   - scene hierarchy
 //   - render system (render resource vs render parameter)
 //   - [ ] draw world axis and half planes
@@ -187,9 +192,12 @@ void main() {
 
 struct RenderPanel : Panel {
   constexpr static const char* type = "Render Panel";
+
   const SimpleRenderer& renderer_;
 
-  RenderPanel(SimpleRenderer& renderer) : renderer_{renderer} {}
+  RenderPanel(SimpleRenderer& renderer) : renderer_{renderer} {
+    style_vars_ = { {ImGuiStyleVar_WindowPadding, ImVec2{0, 0} }};
+  }
 
   void processUI() override {
     renderer_.fb_->setSize({content_size_[0], content_size_[1]});
@@ -258,6 +266,7 @@ struct App {
 
     panel_manager_.reset(new PanelManager{*window_});
     panel_manager_->registerPanelType<StyleEditorPanel>();
+    panel_manager_->registerPanelType<MetricsPanel>();
     panel_manager_->registerPanelType<RenderPanel>([&]() { return new RenderPanel{*renderer_}; });
     panel_manager_->registerPanelType<PropertyPanel>([&]() { return new PropertyPanel{*renderer_}; });
 
@@ -266,6 +275,7 @@ struct App {
   }
 
   void processMainMenuBar() {
+    auto _ = ImScoped::StyleVar(ImGuiStyleVar_FramePadding, {4, 6});
     if (auto _ = ImScoped::MainMenuBar()) {
       if (auto _ = ImScoped::Menu("Menu")) {
         panel_manager_->processPanelManagerMenuItems();

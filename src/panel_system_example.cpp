@@ -17,7 +17,6 @@ using namespace utils;
 struct App {
   std::unique_ptr<toy::Window> window_;
   std::unique_ptr<PanelManager> panel_manager_;
-  ivec2 main_menu_padding_ = {4, 6};
   bool done_ = false;
 
   App() {
@@ -31,7 +30,7 @@ struct App {
   }
 
   void processMainMenuBar() {
-    auto _ = ImScoped::StyleVar(ImGuiStyleVar_FramePadding, toImVec2(main_menu_padding_));
+    auto _ = ImScoped::StyleVar(ImGuiStyleVar_FramePadding, {4, 6});
     if (auto _ = ImScoped::MainMenuBar()) {
       if (auto _ = ImScoped::Menu("Menu")) {
         panel_manager_->processPanelManagerMenuItems();
@@ -44,14 +43,7 @@ struct App {
 
   void processUI() {
     processMainMenuBar();
-
-    // NOTE:
-    // you can give the exact content offset/size to `PanelManager`,
-    // which is necessary, for example, when you change main menu bar's style.
-    auto g = window_->imgui_context_;
-    ivec2 content_offset = {0, g->FontBaseSize + main_menu_padding_.y * 2};
-    ivec2 content_size = fromImVec2<int>(window_->io_->DisplaySize) - content_offset;
-    panel_manager_->processUI(content_offset, content_size);
+    panel_manager_->processUI();
   }
 
   int exec() {
