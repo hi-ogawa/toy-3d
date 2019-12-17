@@ -47,10 +47,9 @@ using glm::ivec2, glm::fvec2;
 // [x] "transform" property editor
 //   - [x] imgui
 //   - [-] gizmo
-// [@] draw multiple meshes
-//   - std::vector<Node> models_ ??
-//   -
-// [ ] support simple mesh base color texture
+// [x] draw multiple meshes
+// [x] draw multiple ui
+// [@] support simple mesh base color texture
 // [ ] draw mesh from gltf
 // [ ] organize scene system
 //   - [ ] immitate gltf data structure
@@ -92,27 +91,22 @@ struct SimpleRenderer {
     std::vector<VertexData> vertices_;
     std::vector<uint8_t> indices_; // triangles
 
-    static Mesh createCube() {
-      auto [positions, colors, indices] = utils::createCube();
+    using create_func_t = std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>>();
+    static Mesh create(create_func_t create_func) {
+      auto [positions, colors, indices] = create_func();
       return {
         .vertices_ = utils::interleave<VertexData>(positions, colors),
-        .indices_ = indices
+        .indices_ = indices,
       };
-    }
+    };
   };
 
   struct Node {
     glm::fmat4 transform_ = glm::fmat4{1};
     Mesh mesh_;
+    utils::gl::VertexRenderer renderer_;
     Node(Mesh&& mesh) : mesh_{std::move(mesh)} {}
   };
-
-  std::unique_ptr<Camera> camera_;
-  std::unique_ptr<Node> model_;
-
-  std::unique_ptr<utils::gl::Program> program_;
-  std::unique_ptr<utils::gl::Framebuffer> fb_;
-  std::unique_ptr<utils::gl::VertexRenderer> vertex_renderer_;
 
   constexpr static inline const char* vertex_shader_source = R"(
 #version 410
@@ -137,25 +131,37 @@ void main() {
 }
 )";
 
+  std::unique_ptr<Camera> camera_;
+  std::vector<std::unique_ptr<Node>> models_;
+  std::unique_ptr<utils::gl::Program> program_;
+  std::unique_ptr<utils::gl::Framebuffer> fb_;
+
   SimpleRenderer() {
     // GL resource
     program_.reset(new utils::gl::Program{vertex_shader_source, fragment_shader_source});
     fb_.reset(new utils::gl::Framebuffer);
-    vertex_renderer_.reset(new utils::gl::VertexRenderer);
 
     // Scene data
-    model_.reset(new Node{Mesh::createCube()});
     camera_.reset(new Camera);
-    camera_->transform_[3] = glm::fvec4{-.7, 1.5, 4, 1}; // Default camera position
+    models_.emplace_back(new Node{Mesh::create(utils::createCube)});
+    models_.emplace_back(new Node{Mesh::create(utils::create4Hedron)});
+    models_.emplace_back(new Node{Mesh::create(utils::createPlane)});
+
+    // Position them so we can see all
+    camera_->transform_[3] = glm::fvec4{-.7, 1.5, 4, 1};
+    models_[0]->transform_[3] = glm::fvec4{-2, 0, 0, 1};
+    models_[1]->transform_[3] = glm::fvec4{ 0, 2, 0, 1};
 
     // Setup GL data
-    vertex_renderer_->setData(model_->mesh_.vertices_, model_->mesh_.indices_);
-    vertex_renderer_->setFormat(
-        glGetAttribLocation(program_->handle_, "vert_position_"),
-        3, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, position));
-    vertex_renderer_->setFormat(
-        glGetAttribLocation(program_->handle_, "vert_color_"),
-        4, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, color));
+    for (auto& model : models_) {
+      model->renderer_.setData(model->mesh_.vertices_, model->mesh_.indices_);
+      model->renderer_.setFormat(
+          glGetAttribLocation(program_->handle_, "vert_position_"),
+          3, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, position));
+      model->renderer_.setFormat(
+          glGetAttribLocation(program_->handle_, "vert_color_"),
+          4, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, color));
+    }
   }
 
   void draw() {
@@ -180,12 +186,14 @@ void main() {
 
     // setup uniforms
     glUseProgram(program_->handle_);
-    program_->setUniform("model_xform_", model_->transform_);
     program_->setUniform("view_inv_xform_", utils::inverse(camera_->transform_));
     program_->setUniform("view_projection_", camera_->getPerspectiveProjection());
 
     // draw
-    vertex_renderer_->draw();
+    for (auto& model : models_) {
+      program_->setUniform("model_xform_", model->transform_);
+      model->renderer_.draw();
+    }
   }
 };
 
@@ -215,30 +223,36 @@ struct PropertyPanel : Panel {
   PropertyPanel(SimpleRenderer& renderer) : renderer_{renderer} {}
 
   void processUI() override {
-    if (auto _ = ImScoped::TreeNodeEx("Model transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-      ImGui::Text("Location");
-      ImGui::SetNextItemWidth(-1);
-      ImGui::DragFloat3("##model-loc", (float*)&renderer_.model_->transform_[3], .1);
+    for (auto& model : renderer_.models_) {
+      auto _ = ImScoped::ID(model.get());
+      if (auto _ = ImScoped::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Text("Location");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::DragFloat3("##model-loc", (float*)&model->transform_[3], .02);
 
-      ImGui::Text("Rotation");
-      ImGui::SetNextItemWidth(-1);
+        ImGui::Text("Rotation");
+        ImGui::SetNextItemWidth(-1);
 
-      static fvec3 angles_;
-      auto updated = ImGui::DragFloat3("##model-rot", (float*)&angles_, .5);
-      if (updated) {
-        auto so3 = utils::ExtrinsicEulerXYZ_to_SO3(angles_);
-        renderer_.model_->transform_[0] = {so3[0], 0};
-        renderer_.model_->transform_[1] = {so3[1], 0};
-        renderer_.model_->transform_[2] = {so3[2], 0};
+        static fvec3 angles_;
+        auto updated = ImGui::DragFloat3("##model-rot", (float*)&angles_, .5);
+        if (updated) {
+          auto so3 = utils::ExtrinsicEulerXYZ_to_SO3(angles_);
+          model->transform_[0] = {so3[0], 0};
+          model->transform_[1] = {so3[1], 0};
+          model->transform_[2] = {so3[2], 0};
+        }
+
+        if (auto _ = ImScoped::TreeNode("Matrix")) {
+          ImGui::SetNextItemWidth(-1);
+          ImGui::DragFloat4("##model-xform0", (float*)&model->transform_[0], .1);
+          ImGui::SetNextItemWidth(-1);
+          ImGui::DragFloat4("##model-xform1", (float*)&model->transform_[1], .1);
+          ImGui::SetNextItemWidth(-1);
+          ImGui::DragFloat4("##model-xform2", (float*)&model->transform_[2], .1);
+          ImGui::SetNextItemWidth(-1);
+          ImGui::DragFloat4("##model-xform3", (float*)&model->transform_[3], .1);
+        }
       }
-
-      ImGui::Text("SO(3) (for debug)");
-      ImGui::SetNextItemWidth(-1);
-      ImGui::DragFloat3("##model-xform0", (float*)&renderer_.model_->transform_[0], .1);
-      ImGui::SetNextItemWidth(-1);
-      ImGui::DragFloat3("##model-xform1", (float*)&renderer_.model_->transform_[1], .1);
-      ImGui::SetNextItemWidth(-1);
-      ImGui::DragFloat3("##model-xform2", (float*)&renderer_.model_->transform_[2], .1);
     }
 
     if (auto _ = ImScoped::TreeNodeEx("Camera transform", ImGuiTreeNodeFlags_DefaultOpen)) {
