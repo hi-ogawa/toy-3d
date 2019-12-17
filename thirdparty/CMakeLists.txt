@@ -13,7 +13,7 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL " " FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL " " FORCE)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL " " FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL " " FORCE)
-add_subdirectory(glfw)
+add_subdirectory(glfw EXCLUDE_FROM_ALL)
 
 
 #
@@ -62,5 +62,25 @@ target_link_libraries(imgui_example PRIVATE imgui gl3w glfw)
 #
 # stb
 #
+
 add_library(stb ${CMAKE_CURRENT_SOURCE_DIR}/stb.c)
 target_include_directories(stb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/stb)
+
+
+#
+# cgltf
+#
+
+add_library(cgltf ${CMAKE_CURRENT_SOURCE_DIR}/cgltf.c)
+target_include_directories(cgltf PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cgltf)
+
+#
+# yocto
+#
+
+set(YOCTO_OPENGL OFF CACHE BOOL " " FORCE)
+set(YOCTO_TESTING OFF CACHE BOOL " " FORCE)
+add_subdirectory(yocto-gl EXCLUDE_FROM_ALL) # => add_library(yocto ...)
+
+# patch the target in order to propagate include directories for targets depending on this
+target_include_directories(yocto PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/yocto-gl/yocto)
