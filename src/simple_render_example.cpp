@@ -4,11 +4,13 @@
 
 #include <fmt/format.h>
 #include <imgui.h>
-#include <glm/glm.hpp>
 #include <imgui_scoped.h>
+#include <glm/glm.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
 
 #include "window.hpp"
 #include "panel_system.hpp"
+#include "panel_system_utils.hpp"
 #include "utils.hpp"
 
 
@@ -58,34 +60,8 @@ using glm::ivec2, glm::fvec2;
 
 
 struct SimpleRenderer {
-  // Only used in ImGui property editor
-  struct Rotation {
-    glm::fvec3 data_;
-    glm::fmat3 ExtrinsicEulerXYZ_to_SO3() {
-      auto x = data_[0] * 3.14 / 180., cx = std::cos(x), sx = std::sin(x);
-      auto y = data_[1] * 3.14 / 180., cy = std::cos(y), sy = std::sin(y);
-      auto z = data_[2] * 3.14 / 180., cz = std::cos(z), sz = std::sin(z);
-      auto Rx = glm::fmat3{
-          1,   0,   0,
-          0,  cx,  sx,
-          0, -sx,  cx,
-      };
-      auto Ry = glm::fmat3{
-         cy,   0, -sy,
-          0,   1,   0,
-         sy,   0,  cy,
-      };
-      auto Rz = glm::fmat3{
-         cz,  sz,   0,
-        -sz,  cz,   0,
-          0,   0,   1,
-      };
-      return Rz * Ry * Rx;
-    }
-  };
 
   struct Camera {
-    // https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#cameras
     glm::fmat4 transform_ = glm::fmat4{1};
     float yfov_ = std::acos(-1) / 3.; // 60deg
     float aspect_ratio_ = 16. / 9.;
@@ -93,35 +69,14 @@ struct SimpleRenderer {
     float zfar_ = 1000;
 
     glm::fmat4 getPerspectiveProjection() {
-      //
       // Derivation
       // 1. perspective-project xy coordinates of "z < 0" half space onto "z = -1" plane
-      // 2. (unique) anti-monotone function P(z) = (A z + B) / z
-      //     s.t. P(-n) = -1 and P(-f) = 1
+      // 2. (unique) anti-monotone function "P(z) = (A z + B) / z" s.t. P(-n) = -1 and P(-f) = 1
       // 3. scale xy fov to [-1, 1]^2
-      //
-      auto n = znear_, f = zfar_;
-      float A = (f + n) / (f - n);
-      float B = 2 * f * n / (f - n);
-      float x = 1 / (std::tan(yfov_ / 2) * aspect_ratio_);
-      float y = 1 / std::tan(yfov_ / 2);
-
-      //
-      // NOTE:
-      // It feels "result" and "- result" should be equivalent, but it is not the case.
-      // Because OpenGL runs clipping by (-w' <= x', y', z' <= w'), it requires
-      // for "z < 0" half space to be mapped to w' = -z > 0.
-      //
-      auto result = glm::fmat4{
-        x, 0,  0,  0,
-        0, y,  0,  0,
-        0, 0, -A, -1,
-        0, 0, -B,  0,
-      };
-      return result;
+      // 4. "z < 0" has to be mapped to "w' = -z > 0"
+      return glm::perspectiveRH_NO(yfov_, aspect_ratio_, znear_, zfar_);
     }
   };
-  std::unique_ptr<Camera> camera_;
 
   struct VertexData {
     glm::fvec3 position;
@@ -132,79 +87,23 @@ struct SimpleRenderer {
     std::vector<VertexData> vertices_;
     std::vector<uint8_t> indices_; // triangles
 
-    std::vector<glm::u8vec3> indices;
-
     static Mesh createCube() {
-      Mesh result;
-      result.vertices_ = {
-        { { 0, 0, 0 }, { 0, 0, 0, 1 } },
-        { { 1, 0, 0 }, { 1, 0, 0, 1 } },
-        { { 1, 1, 0 }, { 1, 1, 0, 1 } },
-        { { 0, 1, 0 }, { 0, 1, 0, 1 } },
-        { { 0, 0, 1 }, { 0, 0, 1, 1 } },
-        { { 1, 0, 1 }, { 1, 0, 1, 1 } },
-        { { 1, 1, 1 }, { 1, 1, 1, 1 } },
-        { { 0, 1, 1 }, { 0, 1, 1, 1 } },
+      auto [positions, colors, indices] = utils::createCube();
+      return {
+        .vertices_ = utils::interleave<VertexData>(positions, colors),
+        .indices_ = indices
       };
-
-      // CCW face in right-hand system
-      // NOTE:
-      // OpenGL's "window" space (where glCullFace applies) is left-hand system,
-      // but, "getPerspectiveProjection" flips z within NDC, so this is okay.
-      #define QUAD_TO_TRIS(A, B, C, D) A, B, D, C, D, B,
-      result.indices_ = {
-        QUAD_TO_TRIS(0, 3, 2, 1) // bottom
-        QUAD_TO_TRIS(4, 5, 6, 7) // top
-        QUAD_TO_TRIS(0, 1, 5, 4) // side
-        QUAD_TO_TRIS(1, 2, 6, 5) // side
-        QUAD_TO_TRIS(2, 3, 7, 6) // side
-        QUAD_TO_TRIS(3, 0, 4, 7) // side
-      };
-      #undef QUAD_TO_TRIS
-      return result;
-    }
-
-    static Mesh create4hedron() {
-      Mesh result;
-      result.vertices_ = {
-        { { 0, 0, 0 }, { 0, 0, 0, 1 } },
-        { { 1, 1, 0 }, { 1, 0, 0, 1 } },
-        { { 0, 1, 1 }, { 0, 1, 0, 1 } },
-        { { 1, 0, 1 }, { 0, 0, 1, 1 } },
-      };
-      result.indices_ = {
-        0, 2, 1,
-        0, 3, 2,
-        0, 1, 3,
-        1, 2, 3,
-      };
-      return result;
-    }
-
-    static Mesh createPlane() {
-      Mesh result;
-      result.vertices_ = {
-        { { 0, 0, 0 }, { 1, 1, 1, 1 } },
-        { { 1, 0, 0 }, { 1, 0, 0, 1 } },
-        { { 1, 1, 0 }, { 0, 1, 0, 1 } },
-        { { 0, 1, 0 }, { 0, 0, 1, 1 } },
-      };
-      #define QUAD_TO_TRIS(A, B, C, D) A, B, D, C, D, B,
-      result.indices_ = {
-        QUAD_TO_TRIS(0, 1, 2, 3)
-        QUAD_TO_TRIS(4, 5, 6, 7)
-      };
-      #undef QUAD_TO_TRIS
-      return result;
     }
   };
 
-  struct Model {
+  struct Node {
     glm::fmat4 transform_ = glm::fmat4{1};
     Mesh mesh_;
-    Model(Mesh&& mesh) : mesh_{std::move(mesh)} {}
+    Node(Mesh&& mesh) : mesh_{std::move(mesh)} {}
   };
-  std::unique_ptr<Model> model_;
+
+  std::unique_ptr<Camera> camera_;
+  std::unique_ptr<Node> model_;
 
   std::unique_ptr<utils::gl::Program> program_;
   std::unique_ptr<utils::gl::Framebuffer> fb_;
@@ -240,12 +139,11 @@ void main() {
     vertex_renderer_.reset(new utils::gl::VertexRenderer);
 
     // Scene data
-    model_.reset(new Model{Mesh::createCube()});
+    model_.reset(new Node{Mesh::createCube()});
     camera_.reset(new Camera);
     camera_->transform_[3] = glm::fvec4{-.7, 1.5, 4, 1}; // Default camera position
 
     // Setup GL data
-    vertex_renderer_->index_type_ = GL_UNSIGNED_BYTE;
     vertex_renderer_->setData(model_->mesh_.vertices_, model_->mesh_.indices_);
     vertex_renderer_->setFormat(
         glGetAttribLocation(program_->handle_, "vert_position_"),
@@ -294,8 +192,7 @@ struct RenderPanel : Panel {
   RenderPanel(SimpleRenderer& renderer) : renderer_{renderer} {}
 
   void processUI() override {
-    renderer_.fb_->setSize({size_[0], size_[0] * 3. / 4.});
-    ImGui::Text("Size = (%d, %d)", renderer_.fb_->size_[0], renderer_.fb_->size_[1]);
+    renderer_.fb_->setSize({content_size_[0], content_size_[1]});
     ImGui::Image(
         reinterpret_cast<ImTextureID>(renderer_.fb_->texture_handle_),
         toImVec2(renderer_.fb_->size_),
@@ -318,16 +215,16 @@ struct PropertyPanel : Panel {
       ImGui::Text("Rotation");
       ImGui::SetNextItemWidth(-1);
 
-      static SimpleRenderer::Rotation rotation_;
-      auto updated = ImGui::DragFloat3("##model-rot", (float*)&rotation_.data_, .5);
+      static fvec3 angles_;
+      auto updated = ImGui::DragFloat3("##model-rot", (float*)&angles_, .5);
       if (updated) {
-        auto so3 = rotation_.ExtrinsicEulerXYZ_to_SO3();
+        auto so3 = utils::ExtrinsicEulerXYZ_to_SO3(angles_);
         renderer_.model_->transform_[0] = {so3[0], 0};
         renderer_.model_->transform_[1] = {so3[1], 0};
         renderer_.model_->transform_[2] = {so3[2], 0};
       }
 
-      ImGui::Text("SO(3)");
+      ImGui::Text("SO(3) (for debug)");
       ImGui::SetNextItemWidth(-1);
       ImGui::DragFloat3("##model-xform0", (float*)&renderer_.model_->transform_[0], .1);
       ImGui::SetNextItemWidth(-1);
@@ -341,9 +238,12 @@ struct PropertyPanel : Panel {
       ImGui::SetNextItemWidth(-1);
       ImGui::DragFloat3("##camera-loc", (float*)&renderer_.camera_->transform_[3], .1);
     }
+
+    if (auto _ = ImScoped::TreeNodeEx("Framebuffer", ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::Text("Size = (%d, %d)", renderer_.fb_->size_[0], renderer_.fb_->size_[1]);
+    }
   }
 };
-
 
 
 struct App {
@@ -357,10 +257,12 @@ struct App {
     renderer_.reset(new SimpleRenderer{});
 
     panel_manager_.reset(new PanelManager{*window_});
-    panel_manager_->registerPanelType(RenderPanel::type, [&]() { return new RenderPanel{*renderer_}; });
-    panel_manager_->registerPanelType(PropertyPanel::type, [&]() { return new PropertyPanel{*renderer_}; });
+    panel_manager_->registerPanelType<StyleEditorPanel>();
+    panel_manager_->registerPanelType<RenderPanel>([&]() { return new RenderPanel{*renderer_}; });
+    panel_manager_->registerPanelType<PropertyPanel>([&]() { return new PropertyPanel{*renderer_}; });
+
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, RenderPanel::type);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, PropertyPanel::type);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, PropertyPanel::type, 0.6);
   }
 
   void processMainMenuBar() {
@@ -382,7 +284,6 @@ struct App {
   int exec() {
     while(!done_) {
       window_->newFrame();
-      panel_manager_->newFrame();
       processUI();
       renderer_->draw();
       panel_manager_->processPostUI();

@@ -1,7 +1,6 @@
 #pragma once
 
 // Cli
-#include "GL/glcorearb.h"
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -56,12 +55,14 @@ std::ostream& operator<<(std::ostream& os, const glm::fmat4& A) {
 
 namespace toy { namespace utils {
 
+using namespace glm;
+using std::vector, std::string;
+
 //
 // inverse of group SO(3) x R^3 (aka "transform")
 //
 
-glm::fmat4 inverse(const glm::fmat4& F) {
-  using namespace glm;
+fmat4 inverse(const fmat4& F) {
   fmat3 A{F};
   fvec3 b{F[3]};
   auto AT = transpose(A); // i.e. inverse
@@ -71,13 +72,144 @@ glm::fmat4 inverse(const glm::fmat4& F) {
   return G;
 }
 
-//
-// TODO: Mesh primitives
-//
+fmat3 ExtrinsicEulerXYZ_to_SO3(fvec3 degrees_xyz) {
+  auto x = degrees_xyz[0] * 3.14 / 180., cx = std::cos(x), sx = std::sin(x);
+  auto y = degrees_xyz[1] * 3.14 / 180., cy = std::cos(y), sy = std::sin(y);
+  auto z = degrees_xyz[2] * 3.14 / 180., cz = std::cos(z), sz = std::sin(z);
+  auto Rx = glm::fmat3{
+      1,   0,   0,
+      0,  cx,  sx,
+      0, -sx,  cx,
+  };
+  auto Ry = glm::fmat3{
+      cy,   0, -sy,
+      0,   1,   0,
+      sy,   0,  cy,
+  };
+  auto Rz = glm::fmat3{
+      cz,  sz,   0,
+    -sz,  cz,   0,
+      0,   0,   1,
+  };
+  return Rz * Ry * Rx;
+}
 
 //
+// Mesh examples
 //
-//
+
+template<typename TOut, typename T, typename... Ts>
+static vector<TOut> interleave(const vector<T>& v, const vector<Ts>&... vs) {
+  vector<TOut> result;
+  result.resize(v.size());
+  for (auto i = 0; i < v.size(); i++) {
+    result[i] = {v[i], vs[i]...};
+  }
+  return result;
+}
+
+template<typename T>
+vector<T> Quads_to_Triangles(const vector<T>& quad_indices) {
+  auto n = quad_indices.size();
+  if (n % 4 != 0) {
+    throw std::runtime_error{"Invalid argument: quad_indices.size() % 4 != 0"};
+  }
+  vector<T> result;
+  result.resize(n / 4 * 6);
+  for (auto i = 0; i < n / 4; i++) {
+    auto A = quad_indices[4 * i + 0];
+    auto B = quad_indices[4 * i + 1];
+    auto C = quad_indices[4 * i + 2];
+    auto D = quad_indices[4 * i + 3];
+    result[6 * i + 0] = A;
+    result[6 * i + 1] = B;
+    result[6 * i + 2] = D;
+    result[6 * i + 3] = C;
+    result[6 * i + 4] = D;
+    result[6 * i + 5] = B;
+  }
+  return result;
+};
+
+auto createCube() {
+  std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>> result;
+  auto& [positions, colors, indices] = result;
+  positions = {
+    { 0, 0, 0 },
+    { 1, 0, 0 },
+    { 1, 1, 0 },
+    { 0, 1, 0 },
+    { 0, 0, 1 },
+    { 1, 0, 1 },
+    { 1, 1, 1 },
+    { 0, 1, 1 },
+  };
+  colors = {
+    { 0, 0, 0, 1 },
+    { 1, 0, 0, 1 },
+    { 1, 1, 0, 1 },
+    { 0, 1, 0, 1 },
+    { 0, 0, 1, 1 },
+    { 1, 0, 1, 1 },
+    { 1, 1, 1, 1 },
+    { 0, 1, 1, 1 },
+  };
+  indices = Quads_to_Triangles(vector<uint8_t>{
+    0, 3, 2, 1, // z = 0 plane
+    4, 5, 6, 7, // z = 1
+    0, 1, 5, 4, // y = 0
+    1, 2, 6, 5, // x = 1
+    2, 3, 7, 6, // y = 1
+    3, 0, 4, 7, // x = 0
+  });
+  return result;
+}
+
+auto create4Hedron() {
+  std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>> result;
+  auto& [positions, colors, indices] = result;
+  positions = {
+    { 0, 0, 0 },
+    { 1, 1, 0 },
+    { 0, 1, 1 },
+    { 1, 0, 1 },
+  };
+  colors = {
+    { 0, 0, 0, 1 },
+    { 1, 0, 0, 1 },
+    { 0, 1, 0, 1 },
+    { 0, 0, 1, 1 },
+  };
+  indices = {
+    0, 2, 1,
+    0, 3, 2,
+    0, 1, 3,
+    1, 2, 3,
+  };
+  return result;
+}
+
+auto createPlane() {
+  std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>> result;
+  auto& [positions, colors, indices] = result;
+  positions = {
+    { 0, 0, 0 },
+    { 1, 0, 0 },
+    { 1, 1, 0 },
+    { 0, 1, 0 },
+  };
+  colors = {
+    { 1, 1, 1, 1 },
+    { 1, 0, 0, 1 },
+    { 0, 1, 0, 1 },
+    { 0, 0, 1, 1 },
+  };
+  indices = Quads_to_Triangles(vector<uint8_t>{
+    0, 1, 2, 3,
+    4, 5, 6, 7,
+  });
+  return result;
+}
 
 
 //
@@ -258,7 +390,7 @@ namespace gl {
   struct Framebuffer {
     TOY_CLASS_DELETE_COPY(Framebuffer)
     GLuint framebuffer_handle_, texture_handle_, depth_texture_handle_;
-    glm::ivec2 size_ = {0, 0};
+    glm::ivec2 size_ = {1, 1};
 
     Framebuffer() {
       glGenFramebuffers(1, &framebuffer_handle_);
@@ -287,6 +419,9 @@ namespace gl {
     }
 
     void setSize(const glm::ivec2& size) {
+      if (size[0] == 0 || size[1] == 0) {
+        throw std::runtime_error{"Invalid argument: size[0] == 0 || size[1] == 0"};
+      }
       size_ = size;
       glBindTexture(GL_TEXTURE_2D, texture_handle_);
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size_.x, size_.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -300,8 +435,8 @@ namespace gl {
     TOY_CLASS_DELETE_COPY(VertexRenderer)
     GLuint vertex_array_, array_buffer_, element_array_buffer_;
     GLenum primitive_mode_ = GL_TRIANGLES;
-    GLenum index_type_ = GL_UNSIGNED_SHORT;
-    GLsizei num_elements_;
+    GLenum index_type_;
+    GLsizei num_indices_;
 
     VertexRenderer() {
       glGenBuffers(1, &array_buffer_);
@@ -315,13 +450,19 @@ namespace gl {
       glDeleteVertexArrays(1, &vertex_array_);
     }
 
+    template<typename T> void setIndexType();
+    template<> void setIndexType< uint8_t>() { index_type_ = GL_UNSIGNED_BYTE;  };
+    template<> void setIndexType<uint16_t>() { index_type_ = GL_UNSIGNED_SHORT; };
+    template<> void setIndexType<uint32_t>() { index_type_ = GL_UNSIGNED_INT;   };
+
     template<typename T1, typename T2>
-    void setData(std::vector<T1> vertices, std::vector<T2> indices) {
+    void setData(const std::vector<T1>& vertices, const std::vector<T2>& indices) {
       glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
       glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(T1), vertices.data(), GL_STREAM_DRAW);
       glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(T2), indices.data(), GL_STREAM_DRAW);
-      num_elements_ = indices.size();
+      num_indices_ = indices.size();
+      setIndexType<T2>();
     }
 
     void setFormat(
@@ -337,7 +478,7 @@ namespace gl {
       glBindVertexArray(vertex_array_);
       glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
-      glDrawElements(GL_TRIANGLES, num_elements_, index_type_, 0);
+      glDrawElements(primitive_mode_, num_indices_, index_type_, 0);
     }
   };
 }

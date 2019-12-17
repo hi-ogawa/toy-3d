@@ -21,3 +21,31 @@ TEST(UtilsTest, Cli1) {
   EXPECT_EQ(verbose, false);
   EXPECT_EQ(cli.help(), "Usage: <program> --force --verbose -n <arg> -m <arg> <arg-0> <arg-1> ...\n");
 }
+
+TEST(UtilsTest, interleave) {
+  struct VertexData {
+    int x;
+    float y;
+    std::string z;
+  };
+
+  std::vector<int> v1 = {0, 1, 2, 3};
+  std::vector<float> v2 = {.1, .2, .3, .4};
+  std::vector<std::string> v3 = {"p", "q", "r", "s"};
+
+  auto data = toy::utils::interleave<VertexData>(v1, v2, v3);
+
+  std::string result = "\n";
+  std::string expected = R"(
+0 - 0.1 - p
+1 - 0.2 - q
+2 - 0.3 - r
+3 - 0.4 - s
+)";
+
+  for (auto& e : data) {
+    result += fmt::format("{} - {} - {}\n", e.x, e.y, e.z);
+  }
+
+  EXPECT_EQ(result, expected);
+}
