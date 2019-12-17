@@ -29,15 +29,6 @@ TODO
   - https://www.khronos.org/opengl/wiki/Framebuffer_Object
   - render texture onto imgui window
 
-- [@] simple scene viewport
-  - yocto/gl
-    - scene data structure
-    - gltf loader
-  - load yocto's test scene
-    - integrate yocto library (scene struct, loader etc...)
-  - draw scene with simpler shaders
-    - component based "mesh", "material" system?
-
 - scene property editor
 
 - define rendering model
@@ -69,6 +60,30 @@ TODO
     - [x] consider panel interface
     - [x] better resize interaction
   - [@] simple 3d viewport
+    - brainstorming
+      - yocto/gl
+        - scene data structure
+        - gltf loader
+      - load yocto's test scene
+        - integrate yocto library (scene struct, loader etc...)
+      - draw scene with simpler shaders
+        - component based "mesh", "material" system?
+    - todo
+      - [@] borrow yocto/gl's utility first
+        - [@] load tests/shapes1.yaml via `load_scene`
+        - [ ] render scene
+          - defualt camera
+          - cubeshape -> vertex array
+          -
+          -
+          - framebuffer
+    - later
+      - [ ] object (no hierarchy)
+      - [ ] mesh component (triangles)
+      - [ ] transform component
+      - [ ] camera component
+      - object hierarchy
+      - material component
 
 - git
   - undo merge and rebase (example: https://github.com/ocornut/imgui/pull/2197)
@@ -108,3 +123,52 @@ TODO
 * branch-point1
 *
 ```
+
+
+# 2019/12/15
+
+- [x] simple_render_example
+  - frame buffer setup
+    - depth buffer setup
+  - perspective projection
+
+
+# 2019/12/16
+
+- [x] OpenGL coordinate frame
+  - surface orientation
+  - depth
+
+- [@] Transform property editor
+
+- unity3d and c# scripting
+  - mesh generation
+
+- normal vector in pixel shader
+  - tangent space
+  - https://archive.blender.org/wiki/index.php/Dev:Shading/Tangent_Space_Normal_Maps/
+
+
+# 2019/12/17
+
+- scene system
+  - node hierarchy
+    - for starter, all flat
+  - component system
+
+
+- rendering model
+  - [ ] yocto/gl
+  - [ ] gltf viewer
+  - diffuse
+  - image based lighting
+
+
+- viewport ui
+  - [ ] gizmo state, rendering
+  - [ ] ray cast
+
+- imgui style in panel system
+  - [x] change size of main menu
+    - need to tell PanelManager real main menu's size
+  - [x] panel content size
