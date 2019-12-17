@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 #include <imgui.h>
 #include <glm/glm.hpp>
+#include <imgui_scoped.h>
 
 #include "window.hpp"
 #include "panel_system.hpp"
@@ -41,23 +42,61 @@ using glm::ivec2, glm::fvec2;
 // [x] camera
 //   - params..
 //   - transf
-// [@] "transform" property editor
-//   - imgui
-//   - gizmo
-// [@] draw world axis and half planes
+// [x] "transform" property editor
+//   - [x] imgui
+//   - [-] gizmo
+// [@] organize scene system
+//   - [@] immitate gltf data structure
+//   - scene hierarchy
+//   - render system (render resource vs render parameter)
+//   - [ ] draw world axis and half planes
 // [ ] rendering model
-//   - [ ] simple shader
-//   - [ ] uniform, vertex attrib
+//   - https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#appendix-b-brdf-implementation
 // [ ] uv and texture map
 // [ ] in general, just follow gltf's representation
 //   - https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md
 
 
 struct SimpleRenderer {
+  struct Rotation {
+    glm::fvec3 data_;
+    glm::fmat3 ExtrinsicEulerXYZ_to_SO3() {
+      auto x = data_[0] * 3.14 / 180., cx = std::cos(x), sx = std::sin(x);
+      auto y = data_[1] * 3.14 / 180., cy = std::cos(y), sy = std::sin(y);
+      auto z = data_[2] * 3.14 / 180., cz = std::cos(z), sz = std::sin(z);
+      auto Rx = glm::fmat3{
+          1,   0,   0,
+          0,  cx,  sx,
+          0, -sx,  cx,
+      };
+      auto Ry = glm::fmat3{
+         cy,   0, -sy,
+          0,   1,   0,
+         sy,   0,  cy,
+      };
+      auto Rz = glm::fmat3{
+         cz,  sz,   0,
+        -sz,  cz,   0,
+          0,   0,   1,
+      };
+      return Rz * Ry * Rx;
+    }
+  };
+
+  struct Transform {
+    glm::fvec3 scale_ = {1, 1, 1};
+    glm::fvec3 translation_ = {0, 0, 0};
+    Rotation rotation_ = { glm::fvec3{0, 0, 0} };
+    glm::fmat4 getMatrix() {
+      // TODO
+      return {};
+    }
+  };
+
   struct Camera {
     // https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#cameras
     glm::fmat4 transform_ = glm::fmat4{1};
-    float yfov_ = std::acos(-1) * 2. / 3.; // 120deg
+    float yfov_ = std::acos(-1) / 3.; // 60deg
     float aspect_ratio_ = 16. / 9.;
     float znear_ = 0.001;
     float zfar_ = 1000;
@@ -230,31 +269,39 @@ struct SimpleRenderer {
   struct Framebuffer {
     TOY_CLASS_DELETE_COPY(Framebuffer)
     GLuint framebuffer_handle_, texture_handle_, depth_texture_handle_;
-    ivec2 size_;
+    ivec2 size_ = {0, 0};
 
-    Framebuffer(const ivec2& size) : size_{size} {
+    Framebuffer() {
+      glGenFramebuffers(1, &framebuffer_handle_);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer_handle_);
+
+      // color attachment
       glGenTextures(1, &texture_handle_);
       glBindTexture(GL_TEXTURE_2D, texture_handle_);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size_.x, size_.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-
-      glGenFramebuffers(1, &framebuffer_handle_);
-      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer_handle_);
       glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture_handle_, 0);
       glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
-      // Enable depth buffer
+      // depth attachment
       glGenTextures(1, &depth_texture_handle_);
       glBindTexture(GL_TEXTURE_2D, depth_texture_handle_);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
       glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, size_.x, size_.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
-
-      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer_handle_);
       glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth_texture_handle_, 0);
     }
     ~Framebuffer() {
+      glDeleteTextures(1, &depth_texture_handle_);
       glDeleteTextures(1, &texture_handle_);
       glDeleteFramebuffers(1, &framebuffer_handle_);
+    }
+
+    void setSize(const ivec2& size) {
+      size_ = size;
+      glBindTexture(GL_TEXTURE_2D, texture_handle_);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size_.x, size_.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      glBindTexture(GL_TEXTURE_2D, depth_texture_handle_);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, size_.x, size_.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
     }
   };
   std::unique_ptr<Framebuffer> fb_;
@@ -284,17 +331,24 @@ void main() {
 }
 )";
 
-  SimpleRenderer(const ivec2& size) {
-    fb_.reset(new Framebuffer{size});
+  SimpleRenderer() {
+    fb_.reset(new Framebuffer);
     program_.reset(new utils::gl::Program{vertex_shader_source, fragment_shader_source});
     model_.reset(new Model{Mesh::createCube()});
     mesh_renderer_.reset(new MeshRenderer{model_->mesh_, *program_});
-    camera_.reset(new Camera{ .aspect_ratio_ = (float)fb_->size_[0] / fb_->size_[1] });
+    camera_.reset(new Camera);
 
-    camera_->transform_[3] = glm::fvec4{-.5, 1.2, 2, 1};
+    // Default camera position
+    camera_->transform_[3] = glm::fvec4{-.7, 1.5, 4, 1};
   }
 
   void draw() {
+    // Setup
+    camera_->aspect_ratio_ = (float)fb_->size_[0] / fb_->size_[1];
+
+    //
+    // gl calls
+    //
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb_->framebuffer_handle_);
     glViewport(0, 0, fb_->size_[0], fb_->size_[1]);
 
@@ -303,17 +357,13 @@ void main() {
     glEnable(GL_DEPTH_TEST);
 
     // clear buffer
-    {
-      // colorful background (to see at least buffer is used)
-      auto color = utils::HSLtoRGB({std::fmod(glfwGetTime() / 6, 1), 1, 0.5, 1});
-      glClearBufferfv(GL_COLOR, 0, (GLfloat*)&color);
-      float depth = 1;
-      glClearBufferfv(GL_DEPTH, 0, (GLfloat*)&depth);
-    }
+    glm::fvec4 color = {0.2, 0.2, 0.2, 1.0};
+    glClearBufferfv(GL_COLOR, 0, (GLfloat*)&color);
+    float depth = 1;
+    glClearBufferfv(GL_DEPTH, 0, (GLfloat*)&depth);
 
     // setup uniforms
     glUseProgram(program_->handle_);
-
     program_->setUniform("model_xform_", model_->transform_);
     program_->setUniform("view_inv_xform_", utils::inverse(camera_->transform_));
     program_->setUniform("view_projection_", camera_->getPerspectiveProjection());
@@ -331,15 +381,56 @@ struct RenderPanel : Panel {
   RenderPanel(SimpleRenderer& renderer) : renderer_{renderer} {}
 
   void processUI() override {
-    ImGui::SliderFloat4("model_->transform_[3]", (float*)&renderer_.model_->transform_[3], -5, 5);
-    ImGui::SliderFloat4("camera_->transform_[3]", (float*)&renderer_.camera_->transform_[3], -5, 5);
-    ImGui::Text("Render Result (size = (%d, %d))", renderer_.fb_->size_[0], renderer_.fb_->size_[1]);
+    renderer_.fb_->setSize({size_[0], size_[0] * 3. / 4.});
+    ImGui::Text("Size = (%d, %d)", renderer_.fb_->size_[0], renderer_.fb_->size_[1]);
     ImGui::Image(
         reinterpret_cast<ImTextureID>(renderer_.fb_->texture_handle_),
         toImVec2(renderer_.fb_->size_),
         /* uv0 */ {0, 1}, /* uv1 */ {1, 0}); // framebuffer's pixel is ordered from left-bottom.
   }
 };
+
+struct PropertyPanel : Panel {
+  constexpr static const char* type = "Property Panel";
+  const SimpleRenderer& renderer_;
+
+  PropertyPanel(SimpleRenderer& renderer) : renderer_{renderer} {}
+
+  void processUI() override {
+    if (auto _ = ImScoped::TreeNodeEx("Model transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::Text("Location");
+      ImGui::SetNextItemWidth(-1);
+      ImGui::DragFloat3("##model-loc", (float*)&renderer_.model_->transform_[3], .1);
+
+      ImGui::Text("Rotation");
+      ImGui::SetNextItemWidth(-1);
+
+      static SimpleRenderer::Rotation rotation_;
+      auto updated = ImGui::DragFloat3("##model-rot", (float*)&rotation_.data_, .5);
+      if (updated) {
+        auto so3 = rotation_.ExtrinsicEulerXYZ_to_SO3();
+        renderer_.model_->transform_[0] = {so3[0], 0};
+        renderer_.model_->transform_[1] = {so3[1], 0};
+        renderer_.model_->transform_[2] = {so3[2], 0};
+      }
+
+      ImGui::Text("SO(3)");
+      ImGui::SetNextItemWidth(-1);
+      ImGui::DragFloat3("##model-xform0", (float*)&renderer_.model_->transform_[0], .1);
+      ImGui::SetNextItemWidth(-1);
+      ImGui::DragFloat3("##model-xform1", (float*)&renderer_.model_->transform_[1], .1);
+      ImGui::SetNextItemWidth(-1);
+      ImGui::DragFloat3("##model-xform2", (float*)&renderer_.model_->transform_[2], .1);
+    }
+
+    if (auto _ = ImScoped::TreeNodeEx("Camera transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::Text("Location");
+      ImGui::SetNextItemWidth(-1);
+      ImGui::DragFloat3("##camera-loc", (float*)&renderer_.camera_->transform_[3], .1);
+    }
+  }
+};
+
 
 
 struct App {
@@ -349,12 +440,14 @@ struct App {
   bool done_ = false;
 
   App() {
-    window_.reset(new Window{"My Window", {800, 600}, { .gl_debug = true }});
-    renderer_.reset(new SimpleRenderer{ivec2{512, 512}});
+    window_.reset(new Window{"My Window", {800, 600}, { .gl_debug = true, .hint_maximized = true }});
+    renderer_.reset(new SimpleRenderer{});
 
     panel_manager_.reset(new PanelManager{*window_});
     panel_manager_->registerPanelType(RenderPanel::type, [&]() { return new RenderPanel{*renderer_}; });
+    panel_manager_->registerPanelType(PropertyPanel::type, [&]() { return new PropertyPanel{*renderer_}; });
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, RenderPanel::type);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, PropertyPanel::type);
   }
 
   void processMainMenuBar() {

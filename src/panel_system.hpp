@@ -19,6 +19,8 @@ using namespace utils;
 struct Panel {
   std::string id_;
   std::string name_;
+  ivec2 offset_;
+  ivec2 size_;
 
   virtual ~Panel() {}
 
@@ -235,6 +237,8 @@ struct PanelManager {
       auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
       auto panelId = leaf.value_;
       auto& panel = panels_.at(panelId);
+      panel->offset_ = offset;
+      panel->size_ = size;
       if (auto _ = ImScoped::Window(panelId.data(), nullptr, flags)) {
         processPanelMenu(*panel);
         panel->processUI();
