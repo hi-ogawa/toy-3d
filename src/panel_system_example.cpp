@@ -6,6 +6,7 @@
 
 #include "window.hpp"
 #include "panel_system.hpp"
+#include "panel_system_utils.hpp"
 #include "utils.hpp"
 
 
@@ -13,34 +14,24 @@ namespace toy {
 
 using namespace utils;
 
-struct StyleEditorPanel : Panel {
-  void processUI() override {
-    ImGui::ShowStyleEditor();
-  }
-};
-
-struct MetricsPanel : Panel {
-  void processUI() override {
-    ImGui::ShowMetricsWindow(nullptr, /* no_window */ true);
-  }
-};
-
 struct App {
   std::unique_ptr<toy::Window> window_;
   std::unique_ptr<PanelManager> panel_manager_;
+  ivec2 main_menu_padding_ = {4, 6};
   bool done_ = false;
 
   App() {
     window_.reset(new Window{"My Window", {800, 600}});
     panel_manager_.reset(new PanelManager{*window_});
-    panel_manager_->registerPanelType("Style Editor", [](){ return new StyleEditorPanel; });
-    panel_manager_->registerPanelType("Metrics", [](){ return new MetricsPanel; });
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, DefaultPanel::panel_type_);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, "Style Editor");
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, "Metrics");
+    panel_manager_->registerPanelType<StyleEditorPanel>();
+    panel_manager_->registerPanelType<MetricsPanel>();
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, DefaultPanel::type);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, StyleEditorPanel::type);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, MetricsPanel::type);
   }
 
   void processMainMenuBar() {
+    auto _ = ImScoped::StyleVar(ImGuiStyleVar_FramePadding, toImVec2(main_menu_padding_));
     if (auto _ = ImScoped::MainMenuBar()) {
       if (auto _ = ImScoped::Menu("Menu")) {
         panel_manager_->processPanelManagerMenuItems();
@@ -53,13 +44,19 @@ struct App {
 
   void processUI() {
     processMainMenuBar();
-    panel_manager_->processUI();
+
+    // NOTE:
+    // you can give the exact content offset/size to `PanelManager`,
+    // which is necessary, for example, when you change main menu bar's style.
+    auto g = window_->imgui_context_;
+    ivec2 content_offset = {0, g->FontBaseSize + main_menu_padding_.y * 2};
+    ivec2 content_size = fromImVec2<int>(window_->io_->DisplaySize) - content_offset;
+    panel_manager_->processUI(content_offset, content_size);
   }
 
   int exec() {
     while(!done_) {
       window_->newFrame();
-      panel_manager_->newFrame();
       processUI();
       panel_manager_->processPostUI();
       window_->render();

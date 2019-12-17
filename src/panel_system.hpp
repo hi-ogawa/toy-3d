@@ -17,22 +17,24 @@ namespace toy {
 using namespace utils;
 
 struct Panel {
+  std::string type_;
   std::string id_;
   std::string name_;
   ivec2 offset_;
   ivec2 size_;
 
-  virtual ~Panel() {}
+  // layout info without menubar and "imgui window" padding
+  ivec2 content_offset_;
+  ivec2 content_size_;
 
-  // TODO: consider interface (what should be the argument)
-  // - size, offset of panel wrt whole window
-  // - arbitrary app state
+  virtual ~Panel() {}
   virtual void processUI() {}
   virtual void processMenu() {}
 };
 
 struct DefaultPanel : Panel {
-  static inline std::string panel_type_ = "Default Panel";
+  constexpr static const char* type = "Default Panel";
+  static Panel* newPanelFunc() { return dynamic_cast<Panel*>(new DefaultPanel); }
 
   void processUI() override {
     ImGui::Text("-- Example Panel Content --");
@@ -52,8 +54,8 @@ struct PanelManager {
   int counter_ = 0;
 
   using PanelTypeId = std::string;
-  using panel_new_func_t = std::function<Panel*()>;
-  std::map<std::string, panel_new_func_t> panel_types_;
+  using new_panel_func_t = std::function<Panel*()>;
+  std::map<std::string, new_panel_func_t> panel_type_map_;
 
   const Window& window_;
   std::vector<Command> command_queue_;
@@ -71,19 +73,22 @@ struct PanelManager {
   };
   ResizeContext resize_context_;
 
+  template<typename T>
+  void registerPanelType() {
+    panel_type_map_[T::type] = T::newPanelFunc;
+  }
+
+  template<typename T>
+  void registerPanelType(new_panel_func_t&& new_panel_func) {
+    panel_type_map_[T::type] = std::move(new_panel_func);
+  }
 
   PanelManager(Window& window) : window_{window} {
-    registerPanelType(
-        DefaultPanel::panel_type_,
-        []() { return dynamic_cast<Panel*>(new DefaultPanel); });
+    registerPanelType<DefaultPanel>();
   }
 
   void _addCommand(Command&& command) {
     command_queue_.emplace_back(std::move(command));
-  }
-
-  void registerPanelType(const PanelTypeId& panel_type, const panel_new_func_t& new_func) {
-    panel_types_[panel_type] = new_func;
   }
 
   //
@@ -91,13 +96,14 @@ struct PanelManager {
   //
 
   Panel* _newPanel(const PanelId& id, const PanelTypeId& panel_type) {
-    auto panel = panel_types_[panel_type]();
+    auto panel = panel_type_map_[panel_type]();
     panel->id_ = id;
     panel->name_ = panel_type;
+    panel->type_ = panel_type;
     return panel;
   }
 
-  Leaf* _newLeaf(const PanelTypeId& panel_type = DefaultPanel::panel_type_) {
+  Leaf* _newLeaf(const PanelTypeId& panel_type = DefaultPanel::type) {
     counter_++;
     PanelId id = fmt::format("{}", counter_);
     auto leaf = new Leaf{id};
@@ -108,8 +114,9 @@ struct PanelManager {
 
   void addPanelToRoot(
       kdtree::SplitType split_type = kdtree::SplitType::HORIZONTAL,
-      const PanelTypeId& panel_type = DefaultPanel::panel_type_) {
-    layout_.insertRoot(_newLeaf(panel_type), split_type, 0.5, kdtree::ChildIndex::SECOND);
+      const PanelTypeId& panel_type = DefaultPanel::type,
+      float fraction = 0.5) {
+    layout_.insertRoot(_newLeaf(panel_type), split_type, fraction, kdtree::ChildIndex::SECOND);
   }
 
   void changePanelType(const PanelId& id, PanelTypeId panel_type) {
@@ -169,10 +176,12 @@ struct PanelManager {
           }
         }
         if (auto _ = ImScoped::Menu("Change to")) {
-          for (auto& type : panel_types_) {
-            auto& name = type.first;
-            if (ImGui::MenuItem(name.data())) {
-              _addCommand([&]() { changePanelType(panel.id_, name); });
+          for (auto& pair : panel_type_map_) {
+            auto& type_name = pair.first;
+            if (ImGui::MenuItem(type_name.data(), nullptr, /*selected*/ panel.type_ == type_name)) {
+              if (panel.type_ != type_name) {
+                _addCommand([&]() { changePanelType(panel.id_, type_name); });
+              }
             }
           }
         }
@@ -229,6 +238,10 @@ struct PanelManager {
   }
 
   void _processPanels() {
+    auto g = window_.imgui_context_;
+    ivec2 offset_by_panel_menu = {0, g->FontBaseSize + g->Style.FramePadding.y * 2};
+    ivec2 window_padding = fromImVec2<int>(g->Style.WindowPadding);
+
     layout_.forEachLeaf(content_size_, [&](Leaf& leaf, ivec2 offset, ivec2 size) {
       ImVec2 _offset = toImVec2(offset + content_offset_);
       ImVec2 _size = toImVec2(size);
@@ -239,6 +252,8 @@ struct PanelManager {
       auto& panel = panels_.at(panelId);
       panel->offset_ = offset;
       panel->size_ = size;
+      panel->content_offset_ = offset + offset_by_panel_menu + window_padding;
+      panel->content_size_ = size - panel->content_offset_ - window_padding;
       if (auto _ = ImScoped::Window(panelId.data(), nullptr, flags)) {
         processPanelMenu(*panel);
         panel->processUI();
@@ -246,13 +261,21 @@ struct PanelManager {
     });
   }
 
-  void newFrame() {
+  void _setDefaultContentRect() {
     auto g = window_.imgui_context_;
     content_offset_ = {0, g->FontBaseSize + g->Style.FramePadding.y * 2};
     content_size_ = fromImVec2<int>(window_.io_->DisplaySize) - content_offset_;
   }
 
   void processUI() {
+    _setDefaultContentRect();
+    _processResize();
+    _processPanels();
+  }
+
+  void processUI(const ivec2& content_offset, const ivec2& content_size) {
+    content_offset_ = content_offset;
+    content_size_ = content_size;
     _processResize();
     _processPanels();
   }

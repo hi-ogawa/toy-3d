@@ -178,7 +178,7 @@ struct App {
     renderer_.reset(new Renderer{ivec2{512, 512}});
 
     panel_manager_.reset(new PanelManager{*window_});
-    panel_manager_->registerPanelType(RenderPanel::type, [&]() { return new RenderPanel{*renderer_}; });
+    panel_manager_->registerPanelType<RenderPanel>([&]() { return new RenderPanel{*renderer_}; });
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, RenderPanel::type);
   }
 
@@ -201,7 +201,6 @@ struct App {
   int exec() {
     while(!done_) {
       window_->newFrame();
-      panel_manager_->newFrame();
       processUI();
       renderer_->draw();
       panel_manager_->processPostUI();

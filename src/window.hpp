@@ -79,9 +79,15 @@ struct Window {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr;
+
+    // My preference
     ImGui::GetIO().Fonts->AddFontFromFileTTF(params.imgui_font, 15.0f);
-    ImGui::GetStyle().WindowRounding = 0;
     ImGui::StyleColorsDark();
+    ImGui::GetStyle().WindowRounding = 0;
+    ImGui::GetStyle().TabRounding = 1;
+    ImGui::GetStyle().ScrollbarRounding = 2;
+    ImGui::GetStyle().ScrollbarSize = 10;
+
     ImGui_ImplGlfw_InitForOpenGL(glfw_window_, true);
     ImGui_ImplOpenGL3_Init(params.glsl_version);
     imgui_context_ = ImGui::GetCurrentContext();
