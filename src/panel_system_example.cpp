@@ -20,13 +20,14 @@ struct App {
   bool done_ = false;
 
   App() {
-    window_.reset(new Window{"My Window", {800, 600}});
+    window_.reset(new Window{"My Window", {800, 600}, { .hint_maximized = true }});
     panel_manager_.reset(new PanelManager{*window_});
     panel_manager_->registerPanelType<StyleEditorPanel>();
     panel_manager_->registerPanelType<MetricsPanel>();
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, DefaultPanel::type);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, StyleEditorPanel::type);
+    panel_manager_->registerPanelType<DemoPanel>();
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, MetricsPanel::type);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, StyleEditorPanel::type);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, DemoPanel::type);
   }
 
   void processMainMenuBar() {

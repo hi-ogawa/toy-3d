@@ -1,5 +1,12 @@
 #include "panel_system.hpp"
 
+// Demo components from imgui_demo.cpp (`static` is removed for make them external linkage)
+void ShowDemoWindowWidgets();
+void ShowDemoWindowLayout();
+void ShowDemoWindowPopups();
+void ShowDemoWindowColumns();
+void ShowDemoWindowMisc();
+
 namespace toy {
 
 struct StyleEditorPanel : Panel {
@@ -17,6 +24,19 @@ struct MetricsPanel : Panel {
 
   void processUI() override {
     ImGui::ShowMetricsWindow(nullptr, /* no_window */ true);
+  }
+};
+
+struct DemoPanel : Panel {
+  constexpr static const char* type = "Demo";
+  static Panel* newPanelFunc() { return dynamic_cast<Panel*>(new DemoPanel); }
+
+  void processUI() override {
+    ShowDemoWindowWidgets();
+    ShowDemoWindowLayout();
+    ShowDemoWindowPopups();
+    ShowDemoWindowColumns();
+    ShowDemoWindowMisc();
   }
 };
 
