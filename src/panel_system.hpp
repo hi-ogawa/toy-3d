@@ -215,6 +215,11 @@ struct PanelManager {
   }
 
   void _processResize() {
+    bool imgui_is_active =
+        ImGui::IsAnyItemFocused() |                  // text/slider/drag input etc.. is active
+        (ImGui::GetTopMostPopupModal() != nullptr); // modal window is open
+    if (imgui_is_active) return;
+
     ivec2 input = fromImVec2<int>(window_.io_->MousePos);
     ivec2 hit_margin = {5, 5};
     auto result = layout_.hitTestSeparator(input - content_offset_, hit_margin, content_size_);

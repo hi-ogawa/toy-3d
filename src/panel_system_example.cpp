@@ -25,7 +25,8 @@ struct App {
     panel_manager_->registerPanelType<StyleEditorPanel>();
     panel_manager_->registerPanelType<MetricsPanel>();
     panel_manager_->registerPanelType<DemoPanel>();
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, MetricsPanel::type);
+    panel_manager_->registerPanelType<TestPanel>();
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, TestPanel::type);
     panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, StyleEditorPanel::type);
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, DemoPanel::type);
   }
