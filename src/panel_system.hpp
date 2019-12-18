@@ -89,6 +89,7 @@ struct PanelManager {
     // - true => false : !MouseDown[0] anytime
     // - show resize cursor : resizing or hiTestSeparator true
     bool resizing = false;
+    bool hovoring = false;
     Branch* branch;
   };
   ResizeContext resize_context_;
@@ -215,7 +216,7 @@ struct PanelManager {
 
   void _processResize() {
     ivec2 input = fromImVec2<int>(window_.io_->MousePos);
-    ivec2 hit_margin = {10, 10};
+    ivec2 hit_margin = {5, 5};
     auto result = layout_.hitTestSeparator(input - content_offset_, hit_margin, content_size_);
 
     if (!window_.io_->MouseDown[0]) {
@@ -236,6 +237,9 @@ struct PanelManager {
           break;
         }
       }
+      resize_context_.hovoring = true;
+    } else {
+      resize_context_.hovoring = false;
     }
 
     if (resize_context_.resizing) {
@@ -266,12 +270,14 @@ struct PanelManager {
       auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar |
                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_HorizontalScrollbar;
-      auto panelId = leaf.value_;
-      auto& panel = panels_.at(panelId);
+      if (resize_context_.hovoring) {
+        flags |= ImGuiWindowFlags_NoMouseInputs;
+      }
+      auto& panel = panels_.at(leaf.value_);
       panel->offset_ = offset;
       panel->size_ = size;
       panel->_pushStyleVars();
-      if (auto _ = ImScoped::Window(panelId.data(), nullptr, flags)) {
+      if (auto _ = ImScoped::Window(panel->id_.data(), nullptr, flags)) {
         panel->_popStyleVars();
         // Directly probe ImGuiWindow about layout info
         auto this_imgui_window = ImGui::GetCurrentWindowRead();
