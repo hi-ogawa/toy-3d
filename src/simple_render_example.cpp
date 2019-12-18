@@ -49,7 +49,7 @@ using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat4;
 //   - [x] imgui
 //   - [-] gizmo
 // [x] draw multiple meshes
-// [x] draw multiple ui
+// [x] draw ui for each model
 // [x] support simple mesh base color texture
 //   - [x] update shader (vertex attr + uniform)
 //   - [x] data structure
@@ -60,9 +60,11 @@ using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat4;
 //     - [x] maybe framebuffer specific thing? (no, default buffer got same result.)
 //     - [x] gl version different from imgui_texture_example (no, it's same)
 //     - [x] it turns out it's mis understanding of OpenGL texture/sampler state api.
-// [ ] refactoring
-// [ ] draw mesh from gltf
-// [@] material
+// [@] draw mesh from gltf
+//   - cgltf, import vertex array, texture
+// [ ] mesh/texture loader ui
+// [ ] mesh/texture examples
+// [ ] material
 //    - no vertex color
 //    - property editor
 // [ ] organize scene system
@@ -128,9 +130,25 @@ struct SimpleRenderer {
     };
   };
 
+  struct Texture {
+    utils::gl::Texture base_;
+    std::string name_;
+    std::optional<std::string> filename_;
+    ivec2 size_;
+
+    Texture() {}
+    Texture(const std::string& filename)
+      : name_{filename}, filename_{filename} {
+      auto data = stbi_load(filename.data(), &size_.x, &size_.y, nullptr, 4);
+      TOY_ASSERT_CUSTOM(data, fmt::format("stbi_load failed: {}", filename));
+      base_.setData(size_, data);
+      stbi_image_free(data);
+    }
+  };
+
   struct Material {
     fvec4 base_color_fill_ = {1, 1, 1, 1};
-    std::shared_ptr<utils::gl::Texture> base_color_tex_;
+    std::shared_ptr<Texture> base_color_tex_;
     bool use_base_color_tex_ = false;
     bool use_vertex_color_ = false;
   };
@@ -140,16 +158,7 @@ struct SimpleRenderer {
     Mesh mesh_;
     utils::gl::VertexRenderer renderer_;
     Material material_;
-    Model(Mesh&& mesh) : mesh_{std::move(mesh)} {
-      // TODO: don't hard code
-      const char* filename = TOY_PATH("thirdparty/yocto-gl/tests/textures/uvgrid.png");
-      ivec2 size;
-      auto pixels = stbi_load(filename, &size.x, &size.y, nullptr, 4);
-      TOY_ASSERT(pixels, fmt::format("stbi_load failed: {}", filename));
-      material_.base_color_tex_.reset(new utils::gl::Texture);
-      material_.base_color_tex_->setData(size, pixels);
-      material_.use_base_color_tex_ = true;
-    }
+    Model(Mesh&& mesh) : mesh_{std::move(mesh)} {}
   };
 
   constexpr static inline const char* vertex_shader_source = R"(
@@ -203,9 +212,17 @@ void main() {
 
     // Scene data
     camera_.reset(new Camera);
-    models_.emplace_back(new Model{Mesh::create(utils::createCube)});
+    models_.emplace_back(new Model{Mesh::create(utils::createUVCube)});
     models_.emplace_back(new Model{Mesh::create(utils::create4Hedron)});
-    models_.emplace_back(new Model{Mesh::create(utils::createPlane)});
+    models_.emplace_back(new Model{Mesh::create(utils::createUVPlane)});
+
+    std::shared_ptr<Texture> texture{
+        new Texture{TOY_PATH("thirdparty/yocto-gl/tests/textures/uvgrid.png")}};
+
+    models_[0]->material_.base_color_tex_ = texture;
+    models_[0]->material_.use_base_color_tex_ = true;
+    models_[2]->material_.base_color_tex_ = texture;
+    models_[2]->material_.use_base_color_tex_ = true;
 
     // Position them so we can see all
     camera_->transform_[3] = glm::fvec4{-.7, 1.5, 4, 1};
@@ -259,7 +276,7 @@ void main() {
       program_->setUniform("base_color_fill_", mat.base_color_fill_);
       glActiveTexture(GL_TEXTURE0);
       if (mat.base_color_tex_ && mat.use_base_color_tex_) {
-        glBindTexture(GL_TEXTURE_2D, mat.base_color_tex_->handle_);
+        glBindTexture(GL_TEXTURE_2D, mat.base_color_tex_->base_.handle_);
         program_->setUniform("use_base_color_tex_", 1);
       } else {
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -271,7 +288,6 @@ void main() {
   }
 };
 
-// TODO: Reuse ImagePanel (Framebuffer should use Texture)
 struct RenderPanel : Panel {
   constexpr static const char* type = "Render Panel";
 
@@ -286,7 +302,7 @@ struct RenderPanel : Panel {
     ImGui::Image(
         reinterpret_cast<ImTextureID>(renderer_.fb_->texture_handle_),
         toImVec2(renderer_.fb_->size_),
-        /* uv0 */ {0, 1}, /* uv1 */ {1, 0}); // framebuffer's pixel is ordered from left-bottom.
+        /* uv0 */ {0, 1}, /* uv1 */ {1, 0}); // framebuffer's pixel start from bottom-left.
   }
 };
 
@@ -343,14 +359,15 @@ struct PropertyPanel : Panel {
 
 struct ImagePanel : Panel {
   constexpr static const char* type = "Image";
-  std::shared_ptr<utils::gl::Texture> texture_;
+  std::shared_ptr<SimpleRenderer::Texture> texture_;
 
-  ImagePanel(const std::shared_ptr<utils::gl::Texture> ptr) : texture_{ptr} {}
+  ImagePanel(const std::shared_ptr<SimpleRenderer::Texture>& ptr)
+    : texture_{ptr} {}
 
   void processUI() override {
     if (texture_) {
-      auto handle = reinterpret_cast<ImTextureID>(texture_->handle_);
-      ImGui::Image(handle, toImVec2(texture_->size_));
+      auto handle = reinterpret_cast<ImTextureID>(texture_->base_.handle_);
+      ImGui::Image(handle, toImVec2(texture_->size_ / 2));
     }
   }
 };
@@ -370,6 +387,7 @@ struct App {
     panel_manager_->registerPanelType<MetricsPanel>();
     panel_manager_->registerPanelType<RenderPanel>([&]() { return new RenderPanel{*renderer_}; });
     panel_manager_->registerPanelType<PropertyPanel>([&]() { return new PropertyPanel{*renderer_}; });
+    panel_manager_->registerPanelType<DemoPanel>();
 
     // TODO: better way to pass texture to ImagePanel
     panel_manager_->registerPanelType<ImagePanel>([&]() {

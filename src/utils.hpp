@@ -29,7 +29,12 @@
   TOY_CLASS_DELETE_COPY(CLASS)
 
 // Cf. https://code.woboq.org/userspace/glibc/assert/assert.h.html#88
-#define TOY_ASSERT(EXPR, MESSAGE) \
+#define TOY_ASSERT(EXPR) \
+  if(!static_cast<bool>(EXPR)) {   \
+    throw std::runtime_error{fmt::format("[{}:{}] {}", __FILE__, __LINE__, #EXPR)}; \
+  }
+
+#define TOY_ASSERT_CUSTOM(EXPR, MESSAGE) \
   if(!static_cast<bool>(EXPR)) {   \
     throw std::runtime_error{fmt::format("[{}:{}] {}", __FILE__, __LINE__, MESSAGE)}; \
   }
@@ -135,8 +140,8 @@ vector<T> Quads_to_Triangles(const vector<T>& quad_indices) {
 };
 
 auto createCube() {
-  std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> result;
-  auto& [positions, colors, uvs, indices] = result;
+  std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>> result;
+  auto& [positions, colors, indices] = result;
   positions = {
     { 0, 0, 0 },
     { 1, 0, 0 },
@@ -157,17 +162,6 @@ auto createCube() {
     { 1, 1, 1, 1 },
     { 0, 1, 1, 1 },
   };
-  // [0, 1]^2 repeated on all faces
-  uvs = {
-    { 0, 1 },
-    { 1, 1 },
-    { 0, 1 },
-    { 1, 1 },
-    { 0, 0 },
-    { 1, 0 },
-    { 0, 0 },
-    { 1, 0 },
-  };
   indices = Quads_to_Triangles(vector<uint8_t>{
     0, 3, 2, 1, // z = 0 plane
     4, 5, 6, 7, // z = 1
@@ -177,6 +171,21 @@ auto createCube() {
     3, 0, 4, 7, // x = 0
   });
   return result;
+}
+
+std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> createUVCube() {
+  auto [positions, colors, indices] = createCube();
+  vector<fvec2> uvs = {
+    { 0, 1 },
+    { 1, 1 },
+    { 0, 1 },
+    { 1, 1 },
+    { 0, 0 },
+    { 1, 0 },
+    { 0, 0 },
+    { 1, 0 },
+  };
+  return std::make_tuple(positions, colors, uvs, indices);
 }
 
 auto create4Hedron() {
@@ -225,6 +234,16 @@ auto createPlane() {
   return result;
 }
 
+std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> createUVPlane() {
+  auto [positions, colors, indices] = createPlane();
+  vector<fvec2> uvs = {
+    { 0, 0 },
+    { 1, 0 },
+    { 1, 1 },
+    { 0, 1 },
+  };
+  return std::make_tuple(positions, colors, uvs, indices);
+}
 
 //
 // hsl <--> rgb \in [0, 1]^3
