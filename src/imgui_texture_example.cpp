@@ -56,7 +56,7 @@ struct ImageTexture : Texture {
     2, 3, 1,
   };
   constexpr static inline const char* vertex_shader_source = R"(
-#version 410
+#version 330
 uniform mat4 projection_;
 layout (location = 0) in vec2 position_;
 layout (location = 1) in vec2 uv_;
@@ -67,7 +67,7 @@ void main() {
 }
 )";
   constexpr static inline const char* fragment_shader_source = R"(
-#version 410
+#version 330
 uniform sampler2D texture_;
 in vec2 frag_uv_;
 layout (location = 0) out vec4 out_color_;
@@ -138,14 +138,20 @@ void main() {
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
     glUseProgram(program_->handle_);
-    glUniform1i(uniform_location_texture_, 0);
+
+    ////
+    // Most confusing part of texture setup
+    // (Cf. "Texture image units" https://www.khronos.org/opengl/wiki/Texture)
+    glUniform1i(uniform_location_texture_, 0); // 1. Tell "sampler" to use "0th image unit"
+    glActiveTexture(GL_TEXTURE0);              // 2. Activate "0th image unit" for "texture" to bind to
+    glBindTexture(GL_TEXTURE_2D, handle_);     //    by this `glBindTexture` call.
+    ////
+
     glUniformMatrix4fv(uniform_location_projection_, 1, GL_FALSE, (GLfloat*)&projection);
-    glActiveTexture(GL_TEXTURE0);
 
     glBindVertexArray(vertex_array_);
     glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_array_buffer_);
-    glBindTexture(GL_TEXTURE_2D, handle_);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_BYTE, 0);
   }
 };

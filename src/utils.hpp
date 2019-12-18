@@ -1,19 +1,15 @@
 #pragma once
 
-// Cli
-#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <vector>
 #include <optional>
+#include <map>
 #include <sstream>
-#include <fmt/format.h>
 
-// toImVec2, fromImVec2
+#include <fmt/format.h>
 #include <imgui.h>
 #include <glm/glm.hpp>
-
-// checkGLShader, checkGLProgram
 #include <GL/gl3w.h>
 
 
@@ -32,6 +28,13 @@
   TOY_CLASS_DELETE_MOVE(CLASS)            \
   TOY_CLASS_DELETE_COPY(CLASS)
 
+// Cf. https://code.woboq.org/userspace/glibc/assert/assert.h.html#88
+#define TOY_ASSERT(EXPR, MESSAGE) \
+  if(!static_cast<bool>(EXPR)) {   \
+    throw std::runtime_error{fmt::format("[{}:{}] {}", __FILE__, __LINE__, MESSAGE)}; \
+  }
+
+#define TOY_PATH(PATH) TOY_DIR "/" PATH
 
 //
 // format glm::fmat4x4
@@ -132,8 +135,8 @@ vector<T> Quads_to_Triangles(const vector<T>& quad_indices) {
 };
 
 auto createCube() {
-  std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>> result;
-  auto& [positions, colors, indices] = result;
+  std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> result;
+  auto& [positions, colors, uvs, indices] = result;
   positions = {
     { 0, 0, 0 },
     { 1, 0, 0 },
@@ -153,6 +156,17 @@ auto createCube() {
     { 1, 0, 1, 1 },
     { 1, 1, 1, 1 },
     { 0, 1, 1, 1 },
+  };
+  // [0, 1]^2 repeated on all faces
+  uvs = {
+    { 0, 1 },
+    { 1, 1 },
+    { 0, 1 },
+    { 1, 1 },
+    { 0, 0 },
+    { 1, 0 },
+    { 0, 0 },
+    { 1, 0 },
   };
   indices = Quads_to_Triangles(vector<uint8_t>{
     0, 3, 2, 1, // z = 0 plane
@@ -372,6 +386,13 @@ namespace gl {
       glDeleteProgram(handle_);
     }
 
+    void setUniform(const char* name, const glm::fvec4& value) {
+      auto location = glGetUniformLocation(handle_, name);
+      if (location == -1)
+        throw std::runtime_error{fmt::format("== Uniform ({}) not found ==", name)};
+      glUniform4fv(location, 1, (GLfloat*)&value);
+    }
+
     void setUniform(const char* name, const glm::fmat4& value) {
       auto location = glGetUniformLocation(handle_, name);
       if (location == -1)
@@ -429,6 +450,38 @@ namespace gl {
       glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, size_.x, size_.y, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
     }
   };
+
+  struct Texture {
+    TOY_CLASS_DELETE_COPY(Texture)
+    GLuint handle_;
+    GLenum target_ = GL_TEXTURE_2D;
+    std::map<GLenum, GLenum> params_ = {{GL_TEXTURE_MIN_FILTER, GL_NEAREST}};
+    std::tuple<GLint, GLenum, GLenum> format_triple_ = {GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE};
+    ivec2 size_;
+
+    Texture() {
+      glGenTextures(1, &handle_);
+    }
+    ~Texture() {
+      glDeleteTextures(1, &handle_);
+    }
+    void applyParams() {
+      glBindTexture(target_, handle_);
+      for (auto& [name, value] : params_) {
+        glTexParameteri(target_, name, value);
+      }
+    }
+    // TODO: 1D, 3D, and other variants
+    void setData(const ivec2& size, const GLvoid* data = nullptr) {
+      size_ = size;
+      applyParams();
+      glTexImage2D(
+          target_, 0, std::get<0>(format_triple_),
+          size.x, size.y, 0, std::get<1>(format_triple_),
+          std::get<2>(format_triple_), data);
+    }
+  };
+
 
   // Usable only for interleaved vertex buffer
   struct VertexRenderer {

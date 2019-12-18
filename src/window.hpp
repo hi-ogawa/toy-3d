@@ -21,15 +21,15 @@ using glm::ivec2;
 struct WindowInitParams {
   // gl
   bool gl_debug = false;
-  const char* glsl_version = "#version 410";
-  int gl_version_major = 4;
-  int gl_version_minor = 1;
+  const char* glsl_version = "#version 330";
+  int gl_version_major = 3;
+  int gl_version_minor = 3;
 
   // glfw
   bool hint_maximized = false;
 
   // imgui
-  const char* imgui_font = "./thirdparty/imgui/misc/fonts/Roboto-Medium.ttf";
+  const char* imgui_font = TOY_PATH("thirdparty/imgui/misc/fonts/Roboto-Medium.ttf");
 };
 
 struct Window {

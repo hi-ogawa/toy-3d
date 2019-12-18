@@ -7,6 +7,7 @@
 #include <imgui_scoped.h>
 #include <glm/glm.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
+#include <stb_image.h>
 
 #include "window.hpp"
 #include "panel_system.hpp"
@@ -17,7 +18,7 @@
 namespace toy {
 
 using namespace utils;
-using glm::ivec2, glm::fvec2;
+using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat4;
 
 // [x] drawing
 //   - draw target (texture, frame buffer)
@@ -49,13 +50,27 @@ using glm::ivec2, glm::fvec2;
 //   - [-] gizmo
 // [x] draw multiple meshes
 // [x] draw multiple ui
-// [@] support simple mesh base color texture
+// [x] support simple mesh base color texture
+//   - [x] update shader (vertex attr + uniform)
+//   - [x] data structure
+//   - [x] example mesh uv
+//   - [x] debug
+//     - [x] preview image via imgui (data is loaded correctly)
+//     - [x] uv coordinate is correct
+//     - [x] maybe framebuffer specific thing? (no, default buffer got same result.)
+//     - [x] gl version different from imgui_texture_example (no, it's same)
+//     - [x] it turns out it's mis understanding of OpenGL texture/sampler state api.
+// [ ] refactoring
 // [ ] draw mesh from gltf
+// [@] material
+//    - no vertex color
+//    - property editor
 // [ ] organize scene system
 //   - [ ] immitate gltf data structure
 //   - scene hierarchy
 //   - render system (render resource vs render parameter)
 //   - [ ] draw world axis and half planes
+//   - [ ] load scene from file
 // [ ] rendering model
 //   - https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#appendix-b-brdf-implementation
 // [ ] uv and texture map
@@ -83,56 +98,101 @@ struct SimpleRenderer {
   };
 
   struct VertexData {
-    glm::fvec3 position;
-    glm::fvec4 color;
+    fvec3 position;
+    fvec4 color = {1, 1, 1, 1};
+    fvec2 uv;
   };
 
   struct Mesh {
     std::vector<VertexData> vertices_;
     std::vector<uint8_t> indices_; // triangles
 
-    using create_func_t = std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>>();
-    static Mesh create(create_func_t create_func) {
+    using create_func1_t = std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>>();
+    static Mesh create(create_func1_t create_func) {
       auto [positions, colors, indices] = create_func();
+      std::vector<fvec2> uvs;
+      uvs.resize(positions.size());
       return {
-        .vertices_ = utils::interleave<VertexData>(positions, colors),
+        .vertices_ = utils::interleave<VertexData>(positions, colors, uvs),
+        .indices_ = indices,
+      };
+    };
+
+    using create_func2_t = std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>>();
+    static Mesh create(create_func2_t create_func) {
+      auto [positions, colors, uvs, indices] = create_func();
+      return {
+        .vertices_ = utils::interleave<VertexData>(positions, colors, uvs),
         .indices_ = indices,
       };
     };
   };
 
-  struct Node {
+  struct Material {
+    fvec4 base_color_fill_ = {1, 1, 1, 1};
+    std::shared_ptr<utils::gl::Texture> base_color_tex_;
+    bool use_base_color_tex_ = false;
+    bool use_vertex_color_ = false;
+  };
+
+  struct Model {
     glm::fmat4 transform_ = glm::fmat4{1};
     Mesh mesh_;
     utils::gl::VertexRenderer renderer_;
-    Node(Mesh&& mesh) : mesh_{std::move(mesh)} {}
+    Material material_;
+    Model(Mesh&& mesh) : mesh_{std::move(mesh)} {
+      // TODO: don't hard code
+      const char* filename = TOY_PATH("thirdparty/yocto-gl/tests/textures/uvgrid.png");
+      ivec2 size;
+      auto pixels = stbi_load(filename, &size.x, &size.y, nullptr, 4);
+      TOY_ASSERT(pixels, fmt::format("stbi_load failed: {}", filename));
+      material_.base_color_tex_.reset(new utils::gl::Texture);
+      material_.base_color_tex_->setData(size, pixels);
+      material_.use_base_color_tex_ = true;
+    }
   };
 
   constexpr static inline const char* vertex_shader_source = R"(
-#version 410
+#version 330
 uniform mat4 view_projection_;
 uniform mat4 view_inv_xform_;
 uniform mat4 model_xform_;
+
 layout (location = 0) in vec3 vert_position_;
 layout (location = 1) in vec4 vert_color_;
+layout (location = 2) in vec2 vert_uv_;
+
 out vec4 interp_color_;
+out vec2 interp_uv_;
+
 void main() {
   interp_color_ = vert_color_;
+  interp_uv_ = vert_uv_;
   gl_Position = view_projection_ * view_inv_xform_ * model_xform_ * vec4(vert_position_, 1);
 }
 )";
 
   constexpr static inline const char* fragment_shader_source = R"(
-#version 410
+#version 330
+uniform sampler2D base_color_tex_;
+uniform bool use_base_color_tex_;
+uniform vec4 base_color_fill_;
+
 in vec4 interp_color_;
-layout (location = 0) out vec4 out_color_;
+in vec2 interp_uv_;
+
+layout (location = 0) out vec4 frag_color_;
+
 void main() {
-  out_color_ = interp_color_;
+  vec4 base_color =
+      interp_color_ *
+      ((use_base_color_tex_) ? texture(base_color_tex_, interp_uv_) : base_color_fill_);
+  frag_color_ = base_color;
 }
 )";
 
   std::unique_ptr<Camera> camera_;
-  std::vector<std::unique_ptr<Node>> models_;
+  std::vector<std::unique_ptr<Model>> models_;
   std::unique_ptr<utils::gl::Program> program_;
   std::unique_ptr<utils::gl::Framebuffer> fb_;
 
@@ -143,9 +203,9 @@ void main() {
 
     // Scene data
     camera_.reset(new Camera);
-    models_.emplace_back(new Node{Mesh::create(utils::createCube)});
-    models_.emplace_back(new Node{Mesh::create(utils::create4Hedron)});
-    models_.emplace_back(new Node{Mesh::create(utils::createPlane)});
+    models_.emplace_back(new Model{Mesh::create(utils::createCube)});
+    models_.emplace_back(new Model{Mesh::create(utils::create4Hedron)});
+    models_.emplace_back(new Model{Mesh::create(utils::createPlane)});
 
     // Position them so we can see all
     camera_->transform_[3] = glm::fvec4{-.7, 1.5, 4, 1};
@@ -161,6 +221,9 @@ void main() {
       model->renderer_.setFormat(
           glGetAttribLocation(program_->handle_, "vert_color_"),
           4, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, color));
+      model->renderer_.setFormat(
+          glGetAttribLocation(program_->handle_, "vert_uv_"),
+          2, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, uv));
     }
   }
 
@@ -188,16 +251,27 @@ void main() {
     glUseProgram(program_->handle_);
     program_->setUniform("view_inv_xform_", utils::inverse(camera_->transform_));
     program_->setUniform("view_projection_", camera_->getPerspectiveProjection());
+    program_->setUniform("base_color_tex_", 0);
 
     // draw
     for (auto& model : models_) {
+      auto& mat = model->material_;
+      program_->setUniform("base_color_fill_", mat.base_color_fill_);
+      glActiveTexture(GL_TEXTURE0);
+      if (mat.base_color_tex_ && mat.use_base_color_tex_) {
+        glBindTexture(GL_TEXTURE_2D, mat.base_color_tex_->handle_);
+        program_->setUniform("use_base_color_tex_", 1);
+      } else {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        program_->setUniform("use_base_color_tex_", 0);
+      }
       program_->setUniform("model_xform_", model->transform_);
       model->renderer_.draw();
     }
   }
 };
 
-
+// TODO: Reuse ImagePanel (Framebuffer should use Texture)
 struct RenderPanel : Panel {
   constexpr static const char* type = "Render Panel";
 
@@ -267,6 +341,19 @@ struct PropertyPanel : Panel {
   }
 };
 
+struct ImagePanel : Panel {
+  constexpr static const char* type = "Image";
+  std::shared_ptr<utils::gl::Texture> texture_;
+
+  ImagePanel(const std::shared_ptr<utils::gl::Texture> ptr) : texture_{ptr} {}
+
+  void processUI() override {
+    if (texture_) {
+      auto handle = reinterpret_cast<ImTextureID>(texture_->handle_);
+      ImGui::Image(handle, toImVec2(texture_->size_));
+    }
+  }
+};
 
 struct App {
   std::unique_ptr<toy::Window> window_;
@@ -284,8 +371,13 @@ struct App {
     panel_manager_->registerPanelType<RenderPanel>([&]() { return new RenderPanel{*renderer_}; });
     panel_manager_->registerPanelType<PropertyPanel>([&]() { return new PropertyPanel{*renderer_}; });
 
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, RenderPanel::type);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, PropertyPanel::type, 0.6);
+    // TODO: better way to pass texture to ImagePanel
+    panel_manager_->registerPanelType<ImagePanel>([&]() {
+        return new ImagePanel{renderer_->models_[0]->material_.base_color_tex_}; });
+
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, PropertyPanel::type);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, ImagePanel::type, 0.4);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, RenderPanel::type, 0.4);
   }
 
   void processMainMenuBar() {
