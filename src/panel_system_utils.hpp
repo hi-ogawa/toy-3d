@@ -1,6 +1,6 @@
 #include "panel_system.hpp"
 
-// Demo components from imgui_demo.cpp (`static` is removed for make them external linkage)
+// Demo components from imgui_demo.cpp (`static` is removed to make them external linkage)
 void ShowDemoWindowWidgets();
 void ShowDemoWindowLayout();
 void ShowDemoWindowPopups();

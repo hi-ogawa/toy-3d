@@ -289,7 +289,7 @@ void main() {
 };
 
 struct RenderPanel : Panel {
-  constexpr static const char* type = "Render Panel";
+  constexpr static const char* type = "Render";
 
   const SimpleRenderer& renderer_;
 
@@ -307,7 +307,7 @@ struct RenderPanel : Panel {
 };
 
 struct PropertyPanel : Panel {
-  constexpr static const char* type = "Property Panel";
+  constexpr static const char* type = "Property";
   const SimpleRenderer& renderer_;
 
   PropertyPanel(SimpleRenderer& renderer) : renderer_{renderer} {}
@@ -388,13 +388,11 @@ struct App {
     panel_manager_->registerPanelType<RenderPanel>([&]() { return new RenderPanel{*renderer_}; });
     panel_manager_->registerPanelType<PropertyPanel>([&]() { return new PropertyPanel{*renderer_}; });
     panel_manager_->registerPanelType<DemoPanel>();
-
-    // TODO: better way to pass texture to ImagePanel
     panel_manager_->registerPanelType<ImagePanel>([&]() {
         return new ImagePanel{renderer_->models_[0]->material_.base_color_tex_}; });
 
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, PropertyPanel::type);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, ImagePanel::type, 0.4);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, ImagePanel::type, 0.6);
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, RenderPanel::type, 0.4);
   }
 

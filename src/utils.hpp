@@ -6,6 +6,7 @@
 #include <optional>
 #include <map>
 #include <sstream>
+#include <numeric> // iota
 
 #include <fmt/format.h>
 #include <imgui.h>
@@ -174,18 +175,59 @@ auto createCube() {
 }
 
 std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> createUVCube() {
-  auto [positions, colors, indices] = createCube();
-  vector<fvec2> uvs = {
-    { 0, 1 },
-    { 1, 1 },
-    { 0, 1 },
-    { 1, 1 },
-    { 0, 0 },
-    { 1, 0 },
-    { 0, 0 },
-    { 1, 0 },
+  // Duplicate vertex by "x 3" so that
+  // the single original vertex can have different uv coord for each surrounding face.
+  // V: 8  --(x 3)--> V': 24
+  std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> result;
+  auto& [positions, colors, uvs, indices] = result;
+  positions = {
+    // z = 0
+    { 0, 0, 0 },
+    { 0, 1, 0 },
+    { 1, 1, 0 },
+    { 1, 0, 0 },
+    // z = 1
+    { 0, 0, 1 },
+    { 1, 0, 1 },
+    { 1, 1, 1 },
+    { 0, 1, 1 },
+    // x = 0
+    { 0, 0, 0 },
+    { 0, 0, 1 },
+    { 0, 1, 1 },
+    { 0, 1, 0 },
+    // x = 1
+    { 1, 0, 0 },
+    { 1, 1, 0 },
+    { 1, 1, 1 },
+    { 1, 0, 1 },
+    // y = 0
+    { 0, 0, 0 },
+    { 1, 0, 0 },
+    { 1, 0, 1 },
+    { 0, 0, 1 },
+    // y = 1
+    { 0, 1, 0 },
+    { 0, 1, 1 },
+    { 1, 1, 1 },
+    { 1, 1, 0 },
   };
-  return std::make_tuple(positions, colors, uvs, indices);
+  uvs = {
+    { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 },
+    { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 },
+    { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 },
+    { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 },
+    { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 },
+    { 0, 1 }, { 1, 1 }, { 1, 0 }, { 0, 0 },
+  };
+  colors = {positions.size(), {1, 1, 1, 1}};
+  {
+    vector<uint8_t> quads;
+    quads.resize(positions.size());
+    std::iota(quads.begin(), quads.end(), 0);
+    indices = Quads_to_Triangles(quads);
+  }
+  return result;
 }
 
 auto create4Hedron() {
