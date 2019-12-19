@@ -175,3 +175,75 @@ TODO
 
 - render offscreen for testing?
   - only depends on glfw context creation?
+
+
+# 2019/12/18
+
+- explore more imgui
+  - https://github.com/CedricGuillemet/ImGuizmo
+  - https://github.com/ocornut/imgui/issues/786
+  - https://github.com/ocornut/imgui/issues/2117
+    - gltf multi window on linux
+
+- explore imgui drag&drop
+  - gnome/wayland issue
+    - due to recent mutter bug, drag&drop from nautilus doesn't work.
+      use `GDK_BACKEND=x11 nautilus`.
+  - maybe we better off using sdl
+    - https://wiki.libsdl.org/SDL_DropEvent
+    - it has `SDL_DROPBEGIN`, but it's only the marker for multifile drop.
+  - [@] since we cannot be notified when start dragging from external source,
+    let's employ "two-stage" drag&drop ui.
+
+# 2019/12/19
+
+- Custom drawing in ImGui
+  - curve, grid, plot, color
+
+- Organize scene system
+  - model list
+  - mesh list
+  - material list
+  - mesh, material, model
+  - mesh import/change
+
+```
+scene
+- meshes (shared ptr)
+- textures (shared ptr)
+  - gl resource
+- instances (shared ptr)
+  - mesh (weak ptr)
+  - material (weak ptr)
+- materials (shared ptr)
+  - textures (weak ptr)
+
+
+from editor,
+- add/remove mesh, texture
+```
+
+- clangd extension syntax color fix
+
+- panel layout system e.g.
+
+```
+{
+  "split": 0.6,
+  "type": "Horizontal",
+  "children": [
+    { "panel": "Render" },
+    {
+      "split": 0.6,
+      "type": "Vertical",
+      "children": [
+        { "panel": "Property" },
+        { "panel": "Image" }
+      ]
+    }
+  ]
+}
+```
+
+- c++ smart pointer implementation
+  - shared ptr, weak ptr

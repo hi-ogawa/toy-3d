@@ -1,11 +1,11 @@
 ```
 # Build
 bash scripts/cmake_gen.sh
-ninja -C build
+ninja -C ../toy-3d-build
 
 # Run app
-./build/src/panel_system_example
+../toy-3d-build/src/panel_system_example
 
 # Test
-./build/src/test
+../toy-3d-build/src/test
 ```
