@@ -19,6 +19,7 @@ namespace toy {
 
 using namespace utils;
 using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat4;
+using std::vector, std::string, std::unique_ptr, std::shared_ptr;
 
 // [x] drawing
 //   - draw target (texture, frame buffer)
@@ -106,13 +107,13 @@ struct SimpleRenderer {
   };
 
   struct Mesh {
-    std::vector<VertexData> vertices_;
-    std::vector<uint8_t> indices_; // triangles
+    vector<VertexData> vertices_;
+    vector<uint8_t> indices_; // triangles
 
     using create_func1_t = std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>>();
     static Mesh create(create_func1_t create_func) {
       auto [positions, colors, indices] = create_func();
-      std::vector<fvec2> uvs;
+      vector<fvec2> uvs;
       uvs.resize(positions.size());
       return {
         .vertices_ = utils::interleave<VertexData>(positions, colors, uvs),
@@ -132,12 +133,12 @@ struct SimpleRenderer {
 
   struct Texture {
     utils::gl::Texture base_;
-    std::string name_;
-    std::optional<std::string> filename_;
+    string name_;
+    std::optional<string> filename_;
     ivec2 size_;
 
     Texture() {}
-    Texture(const std::string& filename)
+    Texture(const string& filename)
       : name_{filename}, filename_{filename} {
       auto data = stbi_load(filename.data(), &size_.x, &size_.y, nullptr, 4);
       TOY_ASSERT_CUSTOM(data, fmt::format("stbi_load failed: {}", filename));
@@ -148,7 +149,7 @@ struct SimpleRenderer {
 
   struct Material {
     fvec4 base_color_fill_ = {1, 1, 1, 1};
-    std::shared_ptr<Texture> base_color_tex_;
+    shared_ptr<Texture> base_color_tex_;
     bool use_base_color_tex_ = false;
     bool use_vertex_color_ = false;
   };
@@ -200,10 +201,10 @@ void main() {
 }
 )";
 
-  std::unique_ptr<Camera> camera_;
-  std::vector<std::unique_ptr<Model>> models_;
-  std::unique_ptr<utils::gl::Program> program_;
-  std::unique_ptr<utils::gl::Framebuffer> fb_;
+  unique_ptr<Camera> camera_;
+  vector<unique_ptr<Model>> models_;
+  unique_ptr<utils::gl::Program> program_;
+  unique_ptr<utils::gl::Framebuffer> fb_;
 
   SimpleRenderer() {
     // GL resource
@@ -216,7 +217,7 @@ void main() {
     models_.emplace_back(new Model{Mesh::create(utils::create4Hedron)});
     models_.emplace_back(new Model{Mesh::create(utils::createUVPlane)});
 
-    std::shared_ptr<Texture> texture{
+    shared_ptr<Texture> texture{
         new Texture{TOY_PATH("thirdparty/yocto-gl/tests/textures/uvgrid.png")}};
 
     models_[0]->material_.base_color_tex_ = texture;
@@ -359,9 +360,9 @@ struct PropertyPanel : Panel {
 
 struct ImagePanel : Panel {
   constexpr static const char* type = "Image";
-  std::shared_ptr<SimpleRenderer::Texture> texture_;
+  shared_ptr<SimpleRenderer::Texture> texture_;
 
-  ImagePanel(const std::shared_ptr<SimpleRenderer::Texture>& ptr)
+  ImagePanel(const shared_ptr<SimpleRenderer::Texture>& ptr)
     : texture_{ptr} {}
 
   void processUI() override {
@@ -373,9 +374,9 @@ struct ImagePanel : Panel {
 };
 
 struct App {
-  std::unique_ptr<toy::Window> window_;
-  std::unique_ptr<PanelManager> panel_manager_;
-  std::unique_ptr<SimpleRenderer> renderer_;
+  unique_ptr<toy::Window> window_;
+  unique_ptr<PanelManager> panel_manager_;
+  unique_ptr<SimpleRenderer> renderer_;
   bool done_ = false;
 
   App() {
