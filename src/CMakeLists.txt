@@ -23,8 +23,9 @@ add_executable(gltf_example gltf_example.cpp)
 add_executable(imgui_texture_example imgui_texture_example.cpp)
 add_executable(imgui_framebuffer_example imgui_framebuffer_example.cpp)
 add_executable(playground playground.cpp)
+add_executable(scene_example scene_example.cpp)
 
 # testing
-add_executable(test test.cpp kdtree_test.cpp utils_test.cpp)
+add_executable(test test.cpp kdtree_test.cpp utils_test.cpp scene_test.cpp)
 target_include_directories(test PRIVATE ${GTEST_INCLUDE_DIRS})
 target_link_libraries(test PRIVATE ${GTEST_LIBRARIES} fmt)

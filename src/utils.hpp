@@ -45,6 +45,10 @@
 
 #define GLTF_MODEL_PATH(NAME) GLTF_MODEL_DIR "/2.0/" NAME "/glTF/" NAME ".gltf"
 
+inline std::string getGltfModelPath(const char* name) {
+  return std::string{GLTF_MODEL_DIR} + "/2.0/" + name + "/glTF/" + name + ".gltf";
+}
+
 //
 // format glm::fmat4x4
 //
