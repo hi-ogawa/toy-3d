@@ -12,6 +12,7 @@
 #include <imgui.h>
 #include <glm/glm.hpp>
 #include <GL/gl3w.h>
+#include <cgltf.h>
 
 
 //
@@ -67,6 +68,71 @@ namespace toy { namespace utils {
 using namespace glm;
 using std::vector, std::string;
 
+struct RangeHelper {
+  int start_, end_;
+
+  struct Iterator {
+    int i_;
+
+    int operator*() { return i_; }
+    Iterator& operator++() {
+      i_++;
+      return *this;
+    }
+    bool operator!=(const Iterator& other) {
+      return i_ != other.i_;
+    }
+  };
+
+  Iterator begin() { return Iterator{start_}; };
+  Iterator end() { return Iterator{end_}; };
+};
+
+RangeHelper inline range(int stop) {
+  return RangeHelper{0, stop};
+}
+
+RangeHelper inline range(int start, int stop) {
+  return RangeHelper{start, stop};
+}
+
+
+template<typename T>
+struct EnumerateHelper {
+  size_t start_, end_;
+  T* data;
+
+  struct Iterator {
+    size_t i_;
+    T* data;
+
+    std::pair<size_t, T*> operator*() {
+      return std::make_pair(i_, &data[i_]);
+    }
+    Iterator& operator++() {
+      i_++;
+      return *this;
+    }
+    bool operator!=(const Iterator& other) {
+      return i_ != other.i_;
+    }
+  };
+
+  Iterator begin() { return Iterator{start_, data}; };
+  Iterator end() { return Iterator{end_, data}; };
+};
+
+template<typename T>
+EnumerateHelper<T> inline enumerate(vector<T>& container) {
+  return EnumerateHelper<T>{0, container.size(), container.data()};
+}
+
+template<typename T>
+EnumerateHelper<T> inline enumerate(T container[], size_t size) {
+  return EnumerateHelper<T>{0, size, container};
+}
+
+
 //
 // inverse of group SO(3) x R^3 (aka "transform")
 //
@@ -107,6 +173,7 @@ fmat3 ExtrinsicEulerXYZ_to_SO3(fvec3 degrees_xyz) {
 // Mesh examples
 //
 
+// NOTE: This can be also used to cast single component e.g. vector<uint8_t> => vector<uint16_t>
 template<typename TOut, typename T, typename... Ts>
 static vector<TOut> interleave(const vector<T>& v, const vector<Ts>&... vs) {
   vector<TOut> result;
@@ -138,6 +205,178 @@ vector<T> Quads_to_Triangles(const vector<T>& quad_indices) {
     result[6 * i + 5] = B;
   }
   return result;
+};
+
+// cf. https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md
+struct GltfData {
+
+  struct Texture {
+    string name;
+    string filename;
+  };
+
+  struct Material {
+    string name;
+    fvec4 base_color_factor = {1, 1, 1, 1};
+    std::shared_ptr<Texture> base_color_tex;
+  };
+
+  struct Mesh {
+    struct VertexAttrs {
+      fvec3 position;
+      fvec3 normal;
+      fvec4 tangent;
+      fvec2 texcoord;
+      fvec4 color = {1, 1, 1, 1};
+    };
+
+    string name;
+    vector<uint16_t> indices;
+    vector<VertexAttrs> vertices;
+    std::shared_ptr<Material> material;
+  };
+
+  string filename;
+
+  vector<Texture> textures;
+  vector<Material> materials;
+  vector<Mesh> meshes;
+
+  // TODO: make all shared_ptr<XXX>
+  // vector<std::shared_ptr<Texture>> textures_;
+  // vector<std::shared_ptr<Material>> materials_;
+  // vector<std::shared_ptr<Mesh>> meshes_;
+
+  // Cf. cgltf_accessor_read_index, cgltf_calc_size
+  static void* readAccessor(const cgltf_accessor* accessor, size_t index) {
+    cgltf_size offset = accessor->offset + accessor->buffer_view->offset;
+    uint8_t* element = (uint8_t*)accessor->buffer_view->buffer->data;
+    return (void*)(element + offset + accessor->stride * index);
+  }
+
+  static GltfData load(const char* filename) {
+    GltfData result;
+    result.filename = filename;
+    std::string dirname = {filename , 0, std::string{filename}.rfind('/')};
+    std::map<cgltf_texture*, std::shared_ptr<Texture>> tmp_map1;
+    std::map<cgltf_material*, std::shared_ptr<Material>> tmp_map2;
+
+    // Load gltf file
+    cgltf_options params = {};
+    cgltf_data* data;
+    if (cgltf_parse_file(&params, filename, &data) != cgltf_result_success) {
+      throw std::runtime_error{fmt::format("cgltf_parse_file failed: {}", filename)};
+    }
+    std::unique_ptr<cgltf_data, decltype(&cgltf_free)> final_action{data, &cgltf_free};
+
+    if (cgltf_load_buffers(&params, data, filename) != cgltf_result_success) {
+      throw std::runtime_error{fmt::format("cgltf_load_buffers failed: {}", filename)};
+    }
+
+    //
+    // Convert data
+    //
+    // - Strategy
+    //   - read Texture -> Material -> Mesh in this order
+    //   - each cgltf_primitive becomse Mesh
+    //   - everything triangle
+    // - Assertions
+    //   - indices type is uint16_t (this is the case all but SciFiHelmet (https://github.com/KhronosGroup/glTF-Sample-Models/blob/master/2.0/SciFiHelmet))
+    //   - vertex attribute is already float
+    //
+
+    // Load textures
+    for (auto [i, gtex] : enumerate(data->textures, data->textures_count)) {
+      TOY_ASSERT(gtex->image->uri);
+      result.textures.push_back({
+          .name = gtex->image->uri,
+          .filename = dirname + "/" + gtex->image->uri });
+    }
+
+    // Load material
+    for (auto [i, gmat] : enumerate(data->materials, data->materials_count)) {
+      auto& mat = result.materials.emplace_back();
+      mat.name = gmat->name;
+      if (gmat->has_pbr_metallic_roughness) {
+        auto& pbr = gmat->pbr_metallic_roughness;
+        mat.base_color_factor = *(fvec4*)(pbr.base_color_factor);
+        mat.base_color_tex = tmp_map1[pbr.base_color_texture.texture];
+      }
+    }
+
+    // Load materials
+
+    // Load meshes
+    for (auto [i, gmesh] : enumerate(data->meshes, data->meshes_count)) {
+      for (auto [j, gprim] : enumerate(gmesh->primitives, gmesh->primitives_count)) {
+        auto& mesh = result.meshes.emplace_back();
+        mesh.name = fmt::format("{} ({})", gmesh->name, j + 1);
+        mesh.material = tmp_map2[gprim->material];
+
+        // Read indices
+        {
+          auto accessor = gprim->indices;
+          TOY_ASSERT(accessor->component_type == cgltf_component_type_r_16u);
+          mesh.indices.resize(accessor->count);
+          for (auto k : range(accessor->count)) {
+            mesh.indices[k] = *(uint16_t*)readAccessor(accessor, k);
+          }
+        }
+
+        // Read vertex attributes
+        // TODO: read in non-interleaved mode and check which attributes are found
+        int vertex_count = -1;
+        for (auto [k, gattr] : enumerate(gprim->attributes, gprim->attributes_count)) {
+          TOY_ASSERT(gattr->index == 0);
+
+          auto accessor = gattr->data;
+          if (vertex_count == -1) {
+            vertex_count = accessor->count;
+            mesh.vertices.resize(vertex_count);
+          }
+          TOY_ASSERT(vertex_count == accessor->count);
+          TOY_ASSERT(accessor->component_type == cgltf_component_type_r_32f);
+
+          switch (gattr->type) {
+            case cgltf_attribute_type_position: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].position = *(fvec3*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            case cgltf_attribute_type_normal: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].normal = *(fvec3*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            case cgltf_attribute_type_tangent: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].tangent = *(fvec4*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            case cgltf_attribute_type_texcoord: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].texcoord = *(fvec2*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            case cgltf_attribute_type_color: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].color = *(fvec4*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            default:;
+          }
+        }
+      }
+    }
+
+
+    return result;
+  }
 };
 
 auto createCube() {
@@ -595,45 +834,6 @@ namespace gl {
       glDrawElements(primitive_mode_, num_indices_, index_type_, 0);
     }
   };
-}
-
-
-//
-// Usage:
-// for (auto i : range(10)) { ... }
-//
-// cf.
-// - https://en.cppreference.com/w/cpp/language/range-for
-// - https://en.cppreference.com/w/cpp/named_req/Iterator
-// - https://github.com/xelatihy/yocto-gl/blob/master/yocto/yocto_common.h
-//
-
-struct RangeHelper {
-  int start_, end_;
-
-  struct Iterator {
-    int i_;
-
-    int operator*() { return i_; }
-    Iterator& operator++() {
-      i_++;
-      return *this;
-    }
-    bool operator!=(const Iterator& other) {
-      return i_ != other.i_;
-    }
-  };
-
-  Iterator begin() { return Iterator{start_}; };
-  Iterator end() { return Iterator{end_}; };
-};
-
-RangeHelper inline range(int stop) {
-  return RangeHelper{0, stop};
-}
-
-RangeHelper inline range(int start, int stop) {
-  return RangeHelper{start, stop};
 }
 
 

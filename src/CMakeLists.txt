@@ -6,7 +6,12 @@ pkg_search_module(GTEST REQUIRED gtest)
 link_libraries(glfw gl3w imgui fmt stb cgltf)
 
 # defines
-add_compile_definitions(TOY_DIR="${CMAKE_SOURCE_DIR}")
+set(GLTF_MODEL_DIR "${CMAKE_SOURCE_DIR}/../../others/glTF-Sample-Viewer/assets/models"
+    CACHE PATH "local directly of gltf model repository")
+add_compile_definitions(
+  TOY_DIR="${CMAKE_SOURCE_DIR}"
+  GLTF_MODEL_DIR="${GLTF_MODEL_DIR}"
+)
 
 # executables
 add_executable(main main.cpp)
