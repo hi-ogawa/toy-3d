@@ -21,66 +21,6 @@ using namespace utils;
 using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat4;
 using std::vector, std::string, std::unique_ptr, std::shared_ptr;
 
-// [x] drawing
-//   - draw target (texture, frame buffer)
-//   - clear color
-// [x] setup shader program
-//   - [x] small gl program wrapper
-//   - [@] cube vertex array
-// [x] OpenGL/gltf cordinate system
-//   - right hand frame
-//   - "-Z" camera lookat direction
-//   - "+X" right
-//   - "+Y" up
-// [x] debug strategy
-//   - try remove projection, transform, etc...
-//   - directly specify vertex position
-//   - [x] use default framebuffer (so that user-friendly default is setup out-of-box)
-//   - [x] my fmat4 inverse might be wrong?
-//   - [@] try point rasterization
-// [x] mesh
-//   - alloc vertex array
-//   - transf
-//   - draw program
-//   - check gl's coordinate system (z depth direction)
-// [x] camera
-//   - params..
-//   - transf
-// [x] "transform" property editor
-//   - [x] imgui
-//   - [-] gizmo
-// [x] draw multiple meshes
-// [x] draw ui for each model
-// [x] support simple mesh base color texture
-//   - [x] update shader (vertex attr + uniform)
-//   - [x] data structure
-//   - [x] example mesh uv
-//   - [x] debug
-//     - [x] preview image via imgui (data is loaded correctly)
-//     - [x] uv coordinate is correct
-//     - [x] maybe framebuffer specific thing? (no, default buffer got same result.)
-//     - [x] gl version different from imgui_texture_example (no, it's same)
-//     - [x] it turns out it's mis understanding of OpenGL texture/sampler state api.
-// [@] draw mesh from gltf
-//   - cgltf, import vertex array, texture
-// [ ] mesh/texture loader ui
-// [ ] mesh/texture examples
-// [ ] material
-//    - no vertex color
-//    - property editor
-// [ ] organize scene system
-//   - [ ] immitate gltf data structure
-//   - scene hierarchy
-//   - render system (render resource vs render parameter)
-//   - [ ] draw world axis and half planes
-//   - [ ] load scene from file
-// [ ] rendering model
-//   - https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#appendix-b-brdf-implementation
-// [ ] uv and texture map
-// [ ] in general, just follow gltf's representation
-//   - https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md
-
-
 struct SimpleRenderer {
 
   struct Camera {
@@ -108,7 +48,7 @@ struct SimpleRenderer {
 
   struct Mesh {
     vector<VertexData> vertices_;
-    vector<uint8_t> indices_; // triangles
+    vector<uint16_t> indices_; // triangles
 
     using create_func1_t = std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>>();
     static Mesh create(create_func1_t create_func) {
@@ -117,7 +57,7 @@ struct SimpleRenderer {
       uvs.resize(positions.size());
       return {
         .vertices_ = utils::interleave<VertexData>(positions, colors, uvs),
-        .indices_ = indices,
+        .indices_ = interleave<uint16_t>(indices),
       };
     };
 
@@ -126,7 +66,24 @@ struct SimpleRenderer {
       auto [positions, colors, uvs, indices] = create_func();
       return {
         .vertices_ = utils::interleave<VertexData>(positions, colors, uvs),
-        .indices_ = indices,
+        .indices_ = interleave<uint16_t>(indices),
+      };
+    };
+
+    static Mesh loadGltf(const char* filename) {
+      auto data = utils::GltfData::load(filename);
+      TOY_ASSERT(data.meshes.size() == 1);
+      auto& mesh = data.meshes[0];
+      vector<VertexData> result;
+      result.resize(mesh.vertices.size());
+      for (auto [i, v] : utils::enumerate(mesh.vertices)) {
+        result[i] = { .position = v->position,
+                      .color = v->color,
+                      .uv = v->texcoord };
+      }
+      return {
+        .vertices_ = std::move(result),
+        .indices_ = std::move(mesh.indices),
       };
     };
   };
@@ -217,13 +174,46 @@ void main() {
     models_.emplace_back(new Model{Mesh::create(utils::create4Hedron)});
     models_.emplace_back(new Model{Mesh::create(utils::createUVPlane)});
 
-    shared_ptr<Texture> texture{
-        new Texture{TOY_PATH("thirdparty/yocto-gl/tests/textures/uvgrid.png")}};
+    models_.emplace_back(new Model{
+        Mesh::loadGltf(GLTF_MODEL_PATH("BoxVertexColors"))});
+    // NOTE:
+    // if later vector::emplace_back causes "vector reallocation", this reference can become invalid.
+    // that's why we reserve a bit here.
+    models_.reserve(10);
+    auto& box = models_.emplace_back(new Model{
+        Mesh::loadGltf(GLTF_MODEL_PATH("BoxTextured"))});
+    auto& helmet = models_.emplace_back(new Model{
+        Mesh::loadGltf(GLTF_MODEL_PATH("DamagedHelmet"))});
+    auto& monkey = models_.emplace_back(new Model{
+        Mesh::loadGltf(GLTF_MODEL_PATH("Suzanne"))});
 
-    models_[0]->material_.base_color_tex_ = texture;
-    models_[0]->material_.use_base_color_tex_ = true;
-    models_[2]->material_.base_color_tex_ = texture;
-    models_[2]->material_.use_base_color_tex_ = true;
+    {
+      auto gltf = utils::GltfData::load(GLTF_MODEL_PATH("BoxTextured"));
+      shared_ptr<Texture> texture{new Texture{gltf.textures[0].filename}};
+      box->material_.base_color_tex_.reset(new Texture{gltf.textures[0].filename});
+      box->material_.use_base_color_tex_ = true;
+    }
+    {
+      auto gltf = utils::GltfData::load(GLTF_MODEL_PATH("DamagedHelmet"));
+      shared_ptr<Texture> texture{new Texture{gltf.textures[0].filename}};
+      helmet->material_.base_color_tex_ = texture;
+      helmet->material_.use_base_color_tex_ = true;
+    }
+    {
+      auto gltf = utils::GltfData::load(GLTF_MODEL_PATH("Suzanne"));
+      shared_ptr<Texture> texture{new Texture{gltf.textures[0].filename}};
+      monkey->material_.base_color_tex_ = texture;
+      monkey->material_.use_base_color_tex_ = true;
+    }
+
+    {
+      shared_ptr<Texture> texture{
+          new Texture{TOY_PATH("thirdparty/yocto-gl/tests/textures/uvgrid.png")}};
+      models_[0]->material_.base_color_tex_ = texture;
+      models_[0]->material_.use_base_color_tex_ = true;
+      models_[2]->material_.base_color_tex_ = texture;
+      models_[2]->material_.use_base_color_tex_ = true;
+    }
 
     // Position them so we can see all
     camera_->transform_[3] = glm::fvec4{-.7, 1.5, 4, 1};
@@ -233,15 +223,11 @@ void main() {
     // Setup GL data
     for (auto& model : models_) {
       model->renderer_.setData(model->mesh_.vertices_, model->mesh_.indices_);
-      model->renderer_.setFormat(
-          glGetAttribLocation(program_->handle_, "vert_position_"),
-          3, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, position));
-      model->renderer_.setFormat(
-          glGetAttribLocation(program_->handle_, "vert_color_"),
-          4, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, color));
-      model->renderer_.setFormat(
-          glGetAttribLocation(program_->handle_, "vert_uv_"),
-          2, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, uv));
+      model->renderer_.setFormat(program_->handle_, {
+          { "vert_position_", {3, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, position)} },
+          { "vert_color_",    {4, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, color)} },
+          { "vert_uv_",       {2, GL_FLOAT, GL_FALSE, sizeof(VertexData), (GLvoid*)offsetof(VertexData, uv)} },
+      });
     }
   }
 

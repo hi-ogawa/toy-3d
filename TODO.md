@@ -197,8 +197,15 @@ TODO
 
 # 2019/12/19
 
+- [x] gltf mesh/material import
+
 - Custom drawing in ImGui
   - curve, grid, plot, color
+
+- ImGui
+  - utilize imconfig.h
+    - IM_VEC2_CLASS_EXTRA, IMGUI_DEFINE_MATH_OPERATORS
+
 
 - Organize scene system
   - model list
@@ -247,3 +254,93 @@ from editor,
 
 - c++ smart pointer implementation
   - shared ptr, weak ptr
+
+- lighting technique
+  - https://github.com/KhronosGroup/glTF/blob/master/extensions/2.0/Khronos/KHR_lights_punctual/README.md
+  - https://github.com/KhronosGroup/glTF/blob/master/extensions/2.0/Vendor/EXT_lights_image_based/README.md
+
+
+# 2019/12/20
+
+- explore 3d gizmo
+  - low-level imgui geometry draw/interaction api
+
+- [x] scene system with example
+  - [x] gltf import to our scene system
+  - [ ] example app
+    - [x] renderer
+    - [@] scene property editor
+    - [@] gltf file loader ui
+
+- [-] gltf example model statistics
+  - uint16_t vertex index type?
+    - exception: SciFiHelmet (70074 vertices > 2**16)
+  - single mesh
+    - exception: AlphaBlendModeTest
+  - single primitive per mesh
+    - exception: BrainStem
+  - single scene
+    - exception: ??
+  - integer-encoded float
+    - CesiumMan?
+
+
+```
+TODO simpler_render_example
+
+[x] drawing
+  - draw target (texture, frame buffer)
+  - clear color
+[x] setup shader program
+  - [x] small gl program wrapper
+  - [x] cube vertex array
+[x] OpenGL/gltf cordinate system
+  - right hand frame
+  - "-Z" camera lookat direction
+  - "+X" right
+  - "+Y" up
+[x] debug strategy
+  - try remove projection, transform, etc...
+  - directly specify vertex position
+  - [x] use default framebuffer (so that user-friendly default is setup out-of-box)
+  - [x] my fmat4 inverse might be wrong?
+  - [x] try point rasterization
+[x] mesh
+  - alloc vertex array
+  - transf
+  - draw program
+  - check gl's coordinate system (z depth direction)
+[x] camera
+  - params..
+  - transf
+[x] "transform" property editor
+  - [x] imgui
+  - [-] gizmo
+[x] draw multiple meshes
+[x] draw ui for each model
+[x] support simple mesh base color texture
+  - [x] update shader (vertex attr + uniform)
+  - [x] data structure
+  - [x] example mesh uv
+  - [x] debug
+    - [x] preview image via imgui (data is loaded correctly)
+    - [x] uv coordinate is correct
+    - [x] maybe framebuffer specific thing? (no, default buffer got same result.)
+    - [x] gl version different from imgui_texture_example (no, it's same)
+    - [x] it turns out it's mis understanding of OpenGL texture/sampler state api.
+[x] draw mesh from gltf
+  - [x] only import vertex positions, uv, indices, and base color texture
+[ ] mesh/texture loader ui
+[ ] mesh/texture examples
+[ ] material
+   - no vertex color
+   - property editor
+[ ] organize scene system
+  - [ ] immitate gltf data structure
+  - scene hierarchy
+  - render system (render resource vs render parameter)
+  - [ ] draw world axis and half planes
+  - [ ] load scene from file
+[ ] rendering model
+  - https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#appendix-b-brdf-implementation
+```

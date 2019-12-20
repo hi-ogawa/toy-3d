@@ -1,9 +1,3 @@
-// TODO
-// - [x] skim through cgltf, yocto/gl, etc...
-// - [@] probe node hierarchy
-//   - ??
-// - property viewer/editor
-
 #include <memory>
 #include <stdexcept>
 

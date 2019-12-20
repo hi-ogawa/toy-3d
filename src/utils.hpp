@@ -12,6 +12,7 @@
 #include <imgui.h>
 #include <glm/glm.hpp>
 #include <GL/gl3w.h>
+#include <cgltf.h>
 
 
 //
@@ -42,10 +43,12 @@
 
 #define TOY_PATH(PATH) TOY_DIR "/" PATH
 
+#define GLTF_MODEL_PATH(NAME) GLTF_MODEL_DIR "/2.0/" NAME "/glTF/" NAME ".gltf"
+
 //
 // format glm::fmat4x4
 //
-std::ostream& operator<<(std::ostream& os, const glm::fmat4& A) {
+inline std::ostream& operator<<(std::ostream& os, const glm::fmat4& A) {
   auto _A = reinterpret_cast<const float*>(&A[0][0]);
   os << "{ ";
   for (auto i = 0; i < 16; i++) {
@@ -67,11 +70,76 @@ namespace toy { namespace utils {
 using namespace glm;
 using std::vector, std::string;
 
+struct RangeHelper {
+  int start_, end_;
+
+  struct Iterator {
+    int i_;
+
+    int operator*() { return i_; }
+    Iterator& operator++() {
+      i_++;
+      return *this;
+    }
+    bool operator!=(const Iterator& other) {
+      return i_ != other.i_;
+    }
+  };
+
+  Iterator begin() { return Iterator{start_}; };
+  Iterator end() { return Iterator{end_}; };
+};
+
+RangeHelper inline range(int stop) {
+  return RangeHelper{0, stop};
+}
+
+RangeHelper inline range(int start, int stop) {
+  return RangeHelper{start, stop};
+}
+
+
+template<typename T>
+struct EnumerateHelper {
+  size_t start_, end_;
+  T* data;
+
+  struct Iterator {
+    size_t i_;
+    T* data;
+
+    std::pair<size_t, T*> operator*() {
+      return std::make_pair(i_, &data[i_]);
+    }
+    Iterator& operator++() {
+      i_++;
+      return *this;
+    }
+    bool operator!=(const Iterator& other) {
+      return i_ != other.i_;
+    }
+  };
+
+  Iterator begin() { return Iterator{start_, data}; };
+  Iterator end() { return Iterator{end_, data}; };
+};
+
+template<typename T>
+inline EnumerateHelper<T> enumerate(vector<T>& container) {
+  return EnumerateHelper<T>{0, container.size(), container.data()};
+}
+
+template<typename T>
+inline EnumerateHelper<T> enumerate(T container[], size_t size) {
+  return EnumerateHelper<T>{0, size, container};
+}
+
+
 //
 // inverse of group SO(3) x R^3 (aka "transform")
 //
 
-fmat4 inverse(const fmat4& F) {
+inline fmat4 inverse(const fmat4& F) {
   fmat3 A{F};
   fvec3 b{F[3]};
   auto AT = transpose(A); // i.e. inverse
@@ -81,7 +149,7 @@ fmat4 inverse(const fmat4& F) {
   return G;
 }
 
-fmat3 ExtrinsicEulerXYZ_to_SO3(fvec3 degrees_xyz) {
+inline fmat3 ExtrinsicEulerXYZ_to_SO3(fvec3 degrees_xyz) {
   auto x = degrees_xyz[0] * 3.14 / 180., cx = std::cos(x), sx = std::sin(x);
   auto y = degrees_xyz[1] * 3.14 / 180., cy = std::cos(y), sy = std::sin(y);
   auto z = degrees_xyz[2] * 3.14 / 180., cz = std::cos(z), sz = std::sin(z);
@@ -107,8 +175,9 @@ fmat3 ExtrinsicEulerXYZ_to_SO3(fvec3 degrees_xyz) {
 // Mesh examples
 //
 
+// NOTE: This can be also used to cast single component e.g. vector<uint8_t> => vector<uint16_t>
 template<typename TOut, typename T, typename... Ts>
-static vector<TOut> interleave(const vector<T>& v, const vector<Ts>&... vs) {
+inline vector<TOut> interleave(const vector<T>& v, const vector<Ts>&... vs) {
   vector<TOut> result;
   result.resize(v.size());
   for (auto i = 0; i < v.size(); i++) {
@@ -118,7 +187,7 @@ static vector<TOut> interleave(const vector<T>& v, const vector<Ts>&... vs) {
 }
 
 template<typename T>
-vector<T> Quads_to_Triangles(const vector<T>& quad_indices) {
+inline vector<T> Quads_to_Triangles(const vector<T>& quad_indices) {
   auto n = quad_indices.size();
   if (n % 4 != 0) {
     throw std::runtime_error{"Invalid argument: quad_indices.size() % 4 != 0"};
@@ -140,7 +209,172 @@ vector<T> Quads_to_Triangles(const vector<T>& quad_indices) {
   return result;
 };
 
-auto createCube() {
+// cf. https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md
+struct GltfData {
+
+  struct Texture {
+    string name;
+    string filename;
+  };
+
+  struct Material {
+    string name;
+    fvec4 base_color_factor = {1, 1, 1, 1};
+    std::shared_ptr<Texture> base_color_tex;
+  };
+
+  struct Mesh {
+    struct VertexAttrs {
+      fvec3 position;
+      fvec3 normal;
+      fvec4 tangent;
+      fvec2 texcoord;
+      fvec4 color = {1, 1, 1, 1};
+    };
+
+    string name;
+    vector<uint16_t> indices;
+    vector<VertexAttrs> vertices;
+    std::shared_ptr<Material> material;
+  };
+
+  string filename;
+
+  vector<Texture> textures;
+  vector<Material> materials;
+  vector<Mesh> meshes;
+
+  // Cf. cgltf_accessor_read_index, cgltf_calc_size
+  static void* readAccessor(const cgltf_accessor* accessor, size_t index) {
+    cgltf_size offset = accessor->offset + accessor->buffer_view->offset;
+    uint8_t* element = (uint8_t*)accessor->buffer_view->buffer->data;
+    return (void*)(element + offset + accessor->stride * index);
+  }
+
+  static GltfData load(const char* filename) {
+    GltfData result;
+    result.filename = filename;
+    std::string dirname = {filename , 0, std::string{filename}.rfind('/')};
+    std::map<cgltf_texture*, std::shared_ptr<Texture>> tmp_map1;
+    std::map<cgltf_material*, std::shared_ptr<Material>> tmp_map2;
+
+    // Load gltf file
+    cgltf_options params = {};
+    cgltf_data* data;
+    if (cgltf_parse_file(&params, filename, &data) != cgltf_result_success) {
+      throw std::runtime_error{fmt::format("cgltf_parse_file failed: {}", filename)};
+    }
+    std::unique_ptr<cgltf_data, decltype(&cgltf_free)> final_action{data, &cgltf_free};
+
+    if (cgltf_load_buffers(&params, data, filename) != cgltf_result_success) {
+      throw std::runtime_error{fmt::format("cgltf_load_buffers failed: {}", filename)};
+    }
+
+    //
+    // Convert data
+    //
+    // - Strategy
+    //   - read Texture -> Material -> Mesh in this order
+    //   - each cgltf_primitive becomse Mesh
+    //   - everything triangle
+    // - Assertions
+    //   - indices type is uint16_t (this is the case all but SciFiHelmet (https://github.com/KhronosGroup/glTF-Sample-Models/blob/master/2.0/SciFiHelmet))
+    //   - vertex attribute is already float
+    //
+
+    // Load textures
+    for (auto [i, gtex] : enumerate(data->textures, data->textures_count)) {
+      TOY_ASSERT(gtex->image->uri);
+      result.textures.push_back({
+          .name = gtex->image->uri,
+          .filename = dirname + "/" + gtex->image->uri });
+    }
+
+    // Load materials
+    for (auto [i, gmat] : enumerate(data->materials, data->materials_count)) {
+      auto& mat = result.materials.emplace_back();
+      mat.name = gmat->name;
+      if (gmat->has_pbr_metallic_roughness) {
+        auto& pbr = gmat->pbr_metallic_roughness;
+        mat.base_color_factor = *(fvec4*)(pbr.base_color_factor);
+        mat.base_color_tex = tmp_map1[pbr.base_color_texture.texture];
+      }
+    }
+
+    // Load meshes
+    for (auto [i, gmesh] : enumerate(data->meshes, data->meshes_count)) {
+      for (auto [j, gprim] : enumerate(gmesh->primitives, gmesh->primitives_count)) {
+        auto& mesh = result.meshes.emplace_back();
+        mesh.name = fmt::format("{} ({})", gmesh->name, j + 1);
+        mesh.material = tmp_map2[gprim->material];
+
+        // Read indices
+        {
+          auto accessor = gprim->indices;
+          TOY_ASSERT(accessor->component_type == cgltf_component_type_r_16u);
+          mesh.indices.resize(accessor->count);
+          for (auto k : range(accessor->count)) {
+            mesh.indices[k] = *(uint16_t*)readAccessor(accessor, k);
+          }
+        }
+
+        // Read vertex attributes
+        // TODO: read in non-interleaved mode and check which attributes are found
+        int vertex_count = -1;
+        for (auto [k, gattr] : enumerate(gprim->attributes, gprim->attributes_count)) {
+          TOY_ASSERT(gattr->index == 0);
+
+          auto accessor = gattr->data;
+          if (vertex_count == -1) {
+            vertex_count = accessor->count;
+            mesh.vertices.resize(vertex_count);
+          }
+          TOY_ASSERT(vertex_count == accessor->count);
+          TOY_ASSERT(accessor->component_type == cgltf_component_type_r_32f);
+
+          switch (gattr->type) {
+            case cgltf_attribute_type_position: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].position = *(fvec3*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            case cgltf_attribute_type_normal: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].normal = *(fvec3*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            case cgltf_attribute_type_tangent: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].tangent = *(fvec4*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            case cgltf_attribute_type_texcoord: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].texcoord = *(fvec2*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            case cgltf_attribute_type_color: {
+              for (auto k : range(accessor->count)) {
+                mesh.vertices[k].color = *(fvec4*)readAccessor(accessor, k);
+              }
+              break;
+            }
+            default:;
+          }
+        }
+      }
+    }
+
+
+    return result;
+  }
+};
+
+inline auto createCube() {
   std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>> result;
   auto& [positions, colors, indices] = result;
   positions = {
@@ -174,7 +408,7 @@ auto createCube() {
   return result;
 }
 
-std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> createUVCube() {
+inline std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> createUVCube() {
   // Duplicate vertex by "x 3" so that
   // the single original vertex can have different uv coord for each surrounding face.
   // V: 8  --(x 3)--> V': 24
@@ -230,7 +464,7 @@ std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> createU
   return result;
 }
 
-auto create4Hedron() {
+inline auto create4Hedron() {
   std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>> result;
   auto& [positions, colors, indices] = result;
   positions = {
@@ -254,7 +488,7 @@ auto create4Hedron() {
   return result;
 }
 
-auto createPlane() {
+inline auto createPlane() {
   std::tuple<vector<fvec3>, vector<fvec4>, vector<uint8_t>> result;
   auto& [positions, colors, indices] = result;
   positions = {
@@ -276,7 +510,7 @@ auto createPlane() {
   return result;
 }
 
-std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> createUVPlane() {
+inline std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> createUVPlane() {
   auto [positions, colors, indices] = createPlane();
   vector<fvec2> uvs = {
     { 0, 0 },
@@ -291,7 +525,7 @@ std::tuple<vector<fvec3>, vector<fvec4>, vector<fvec2>, vector<uint8_t>> createU
 // hsl <--> rgb \in [0, 1]^3
 //
 
-glm::fvec4 inline RGBtoHSL(glm::fvec4 c) {
+inline glm::fvec4 RGBtoHSL(glm::fvec4 c) {
   int sort[3];
   if (c.x >= c.y) {
     if (c.y >= c.z) {
@@ -331,7 +565,7 @@ glm::fvec4 inline RGBtoHSL(glm::fvec4 c) {
 // [-1/3  2/3  1 ]
 // [ 1/3  1/3  1 ]
 //
-glm::fvec4 inline HSLtoRGB(glm::fvec4 d) {
+inline glm::fvec4 HSLtoRGB(glm::fvec4 d) {
   float h6 = d.x * 6, s = d.y, l = d.z;
   float dh;
   float csort[3];
@@ -358,15 +592,16 @@ glm::fvec4 inline HSLtoRGB(glm::fvec4 d) {
 
 //
 // glm::ivec2, fvec2  <-->  ImVec2
+// TODO: use IM_VEC2_CLASS_EXTRA
 //
 
 template<typename T>
-ImVec2 inline toImVec2(glm::vec<2, T> v) {
+inline ImVec2 toImVec2(glm::vec<2, T> v) {
   return ImVec2{static_cast<float>(v[0]), static_cast<float>(v[1])};
 };
 
 template<typename T>
-glm::vec<2, T> inline fromImVec2(ImVec2 v) {
+inline glm::vec<2, T> fromImVec2(ImVec2 v) {
   return glm::vec<2, T>{static_cast<T>(v[0]), static_cast<T>(v[1])};
 };
 
@@ -375,7 +610,7 @@ glm::vec<2, T> inline fromImVec2(ImVec2 v) {
 //
 
 namespace gl {
-  void enableDebugMessage() {
+  inline void enableDebugMessage() {
     static auto callback = [](
         GLenum source, GLenum type, GLuint id,
         GLenum severity, GLsizei length,
@@ -389,7 +624,7 @@ namespace gl {
     glDebugMessageCallback(callback, 0);
   }
 
-  std::pair<bool, std::string> checkShader(GLuint handle) {
+  inline std::pair<bool, std::string> checkShader(GLuint handle) {
     std::string log;
     GLint status = 0, log_length = 0;
     glGetShaderiv(handle, GL_COMPILE_STATUS, &status);
@@ -401,7 +636,7 @@ namespace gl {
     return make_pair(status == GL_TRUE, log);
   }
 
-  std::pair<bool, std::string> checkProgram(GLuint handle) {
+  inline std::pair<bool, std::string> checkProgram(GLuint handle) {
     std::string log;
     GLint status = 0, log_length = 0;
     glGetProgramiv(handle, GL_LINK_STATUS, &status);
@@ -415,6 +650,7 @@ namespace gl {
 
   struct Program {
     GLuint handle_, vertex_shader_, fragment_shader_;
+
     Program(const char* vs_src, const char* fs_src) {
       vertex_shader_ = glCreateShader(GL_VERTEX_SHADER);
       fragment_shader_ = glCreateShader(GL_FRAGMENT_SHADER);
@@ -423,20 +659,20 @@ namespace gl {
       glShaderSource(vertex_shader_, 1, &vs_src, nullptr);
       glCompileShader(vertex_shader_);
       if (auto result = checkShader(vertex_shader_); !result.first) {
-        throw std::runtime_error{"== glCompileShader(vertex_shader_) faild. ==\n" + result.second};
+        throw std::runtime_error{"glCompileShader(vertex_shader_) faild\n" + result.second};
       }
 
       glShaderSource(fragment_shader_, 1, &fs_src, nullptr);
       glCompileShader(fragment_shader_);
       if (auto result = checkShader(fragment_shader_); !result.first) {
-        throw std::runtime_error{"== glCompileShader(fragment_shader_) faild. ==\n" + result.second};
+        throw std::runtime_error{"glCompileShader(fragment_shader_) faild\n" + result.second};
       }
 
       glAttachShader(handle_, vertex_shader_);
       glAttachShader(handle_, fragment_shader_);
       glLinkProgram(handle_);
       if (auto result = checkProgram(handle_); !result.first) {
-        throw std::runtime_error{"== glLinkProgram(handle_) faild. ==\n" + result.second};
+        throw std::runtime_error{"glLinkProgram(handle_) faild\n" + result.second};
       }
     }
     ~Program() {
@@ -449,22 +685,19 @@ namespace gl {
 
     void setUniform(const char* name, const glm::fvec4& value) {
       auto location = glGetUniformLocation(handle_, name);
-      if (location == -1)
-        throw std::runtime_error{fmt::format("== Uniform ({}) not found ==", name)};
+      TOY_ASSERT_CUSTOM(location != -1, fmt::format("Uniform ({}) not found", name));
       glUniform4fv(location, 1, (GLfloat*)&value);
     }
 
     void setUniform(const char* name, const glm::fmat4& value) {
       auto location = glGetUniformLocation(handle_, name);
-      if (location == -1)
-        throw std::runtime_error{fmt::format("== Uniform ({}) not found ==", name)};
+      TOY_ASSERT_CUSTOM(location != -1, fmt::format("Uniform ({}) not found", name));
       glUniformMatrix4fv(location, 1, GL_FALSE, (GLfloat*)&value);
     }
 
     void setUniform(const char* name, GLint value) {
       auto location = glGetUniformLocation(handle_, name);
-      if (location == -1)
-        throw std::runtime_error{fmt::format("== Uniform ({}) not found ==", name)};
+      TOY_ASSERT_CUSTOM(location != -1, fmt::format("Uniform ({}) not found", name));
       glUniform1i(location, value);
     }
   };
@@ -580,12 +813,23 @@ namespace gl {
     }
 
     void setFormat(
-        GLint location, GLint size, GLenum type,
-        GLboolean normalized, GLsizei stride, const void* pointer) {
+        GLuint program, const char* name,
+        GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void* pointer) {
+      auto location = glGetAttribLocation(program, name);
+      TOY_ASSERT_CUSTOM(location != -1, fmt::format("Vertex attribute ({}) not found", name));
       glBindVertexArray(vertex_array_);
       glBindBuffer(GL_ARRAY_BUFFER, array_buffer_);
       glEnableVertexAttribArray(location);
       glVertexAttribPointer(location, size, type, normalized, stride, pointer);
+    }
+
+    struct FormatParam {
+      GLint size; GLenum type; GLboolean normalized; GLsizei stride; const void* pointer;
+    };
+    void setFormat(GLuint program, std::map<const char*, FormatParam> format_args) {
+      for (auto& [name, f] : format_args) {
+        setFormat(program, name, f.size, f.type, f.normalized, f.stride, f.pointer);
+      }
     }
 
     void draw() {
@@ -595,45 +839,6 @@ namespace gl {
       glDrawElements(primitive_mode_, num_indices_, index_type_, 0);
     }
   };
-}
-
-
-//
-// Usage:
-// for (auto i : range(10)) { ... }
-//
-// cf.
-// - https://en.cppreference.com/w/cpp/language/range-for
-// - https://en.cppreference.com/w/cpp/named_req/Iterator
-// - https://github.com/xelatihy/yocto-gl/blob/master/yocto/yocto_common.h
-//
-
-struct RangeHelper {
-  int start_, end_;
-
-  struct Iterator {
-    int i_;
-
-    int operator*() { return i_; }
-    Iterator& operator++() {
-      i_++;
-      return *this;
-    }
-    bool operator!=(const Iterator& other) {
-      return i_ != other.i_;
-    }
-  };
-
-  Iterator begin() { return Iterator{start_}; };
-  Iterator end() { return Iterator{end_}; };
-};
-
-RangeHelper inline range(int stop) {
-  return RangeHelper{0, stop};
-}
-
-RangeHelper inline range(int start, int stop) {
-  return RangeHelper{start, stop};
 }
 
 
