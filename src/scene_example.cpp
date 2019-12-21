@@ -46,7 +46,7 @@ struct SceneRenderer {
     glUseProgram(program_->handle_);
 
     // global uniform
-    program_->setUniform("view_inv_xform_", utils::inverse(scene.camera_.transform_));
+    program_->setUniform("view_inv_xform_", utils::inverseTR(scene.camera_.transform_));
     program_->setUniform("view_projection_", scene.camera_.getPerspectiveProjection());
     program_->setUniform("base_color_texture_", 0);
 
@@ -189,24 +189,28 @@ struct AssetsPanel : Panel {
   void UI_Scene() {
     for (auto& node : mng_.scene_->nodes_) {
       auto _ = ImScoped::ID(node.get());
-      if (auto _ = ImScoped::TreeNodeEx(node->name_.data(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::DragFloat3("Location##loc", (float*)&node->transform_[3], .05);
+      if (auto _ = ImScoped::TreeNodeEx(node->name_.data(), ImGuiTreeNodeFlags_DefaultOpen)) {
 
-        // TODO: scale
-        // TODO: angles_ are shared for all nodes
-        static fvec3 angles_;
-        auto updated = ImGui::DragFloat3("Rotation##rot", (float*)&angles_, .5);
-        if (updated) {
-          auto so3 = utils::ExtrinsicEulerXYZ_to_SO3(angles_);
-          node->transform_[0] = {so3[0], 0};
-          node->transform_[1] = {so3[1], 0};
-          node->transform_[2] = {so3[2], 0};
+        if (auto _ = ImScoped::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+          if (ImGui::Button("Reset")) { node->transform_ = fmat4{1}; }
+          imgui::InputTransform(node->transform_);
+        }
+
+        if (auto _ = ImScoped::TreeNodeEx("(Transform Matrix)")) {
+          for (auto i : utils::range(4)) {
+            auto _ = ImScoped::ID(i);
+            ImGui::DragFloat4(fmt::format("transform[{}]", i).data(), (float*)&node->transform_[i], .05);
+          }
         }
       }
     }
 
-    if (auto _ = ImScoped::TreeNodeEx("Camera", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
-      ImGui::DragFloat3("Location##camera-loc", (float*)&mng_.scene_->camera_.transform_[3], .05);
+    if (auto _ = ImScoped::TreeNodeEx("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
+      auto& camera = mng_.scene_->camera_;
+      if (auto _ = ImScoped::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::Button("Reset")) { camera.transform_ = fmat4{1}; }
+        imgui::InputTransform(camera.transform_);
+      }
     }
   }
 
@@ -239,6 +243,7 @@ struct App {
     scene_manager_.reset(new SceneManager);
 
     // load asssets
+    scene_manager_->loadGltf(GLTF_MODEL_PATH("BoxTextured"));
     scene_manager_->loadGltf(GLTF_MODEL_PATH("DamagedHelmet"));
     scene_manager_->loadGltf(GLTF_MODEL_PATH("Suzanne"));
 

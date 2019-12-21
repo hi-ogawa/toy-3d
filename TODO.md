@@ -262,17 +262,10 @@ from editor,
 
 # 2019/12/20
 
-- explore 3d gizmo
+- [-] explore 3d gizmo
   - low-level imgui geometry draw/interaction api
 
-- [x] scene system with example
-  - [x] gltf import to our scene system
-  - [ ] example app
-    - [x] renderer
-    - [@] scene property editor
-    - [@] gltf file loader ui
-
-- [-] gltf example model statistics
+- [x] gltf example model statistics
   - uint16_t vertex index type?
     - exception: SciFiHelmet (70074 vertices > 2**16)
   - single mesh
@@ -284,6 +277,24 @@ from editor,
   - integer-encoded float
     - CesiumMan?
 
+- [ ] imgui log panel
+
+- [x] scene system with example
+  - [x] gltf import to our scene system
+  - [@] example app
+    - [x] renderer
+    - [x] gltf file loader ui
+      - [x] text input
+      - [x] drag&drop
+    - [x] node/camera transform editor
+      - [x] location
+      - [x] rotation and scale
+    - [ ] scene node list as different tab
+    - [ ] asset list
+      - add/remove nodes from scene
+    - [ ] simple procedual mesh/textures
+    - [ ] node picker from 3d viewport
+    - [ ] log panel
 
 ```
 TODO simpler_render_example

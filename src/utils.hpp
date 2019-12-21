@@ -10,7 +10,9 @@
 
 #include <fmt/format.h>
 #include <imgui.h>
+#include <imgui_scoped.h>
 #include <glm/glm.hpp>
+#include <glm/ext/scalar_constants.hpp>
 #include <GL/gl3w.h>
 #include <cgltf.h>
 
@@ -71,7 +73,7 @@ inline std::ostream& operator<<(std::ostream& os, const glm::fmat4& A) {
 
 namespace toy { namespace utils {
 
-using namespace glm;
+using namespace glm; // TODO: explicitly write down
 using std::vector, std::string;
 
 struct RangeHelper {
@@ -140,40 +142,156 @@ inline EnumerateHelper<T> enumerate(T container[], size_t size) {
 
 
 //
-// inverse of group SO(3) x R^3 (aka "transform")
+// inverse in euclidian group SO(3) x R^3 (aka translation and rotation)
 //
 
-inline fmat4 inverse(const fmat4& F) {
+inline fmat4 inverseTR(const fmat4& F) {
   fmat3 A{F};
   fvec3 b{F[3]};
-  auto AT = transpose(A); // i.e. inverse
-  auto c = - AT * b;
+  fmat3 AT = transpose(A); // i.e. inverse
+  fvec3 c = - AT * b;
   fmat4 G{AT};
   G[3] = fvec4{c, 1};
   return G;
 }
 
-inline fmat3 ExtrinsicEulerXYZ_to_SO3(fvec3 degrees_xyz) {
-  auto x = degrees_xyz[0] * 3.14 / 180., cx = std::cos(x), sx = std::sin(x);
-  auto y = degrees_xyz[1] * 3.14 / 180., cy = std::cos(y), sy = std::sin(y);
-  auto z = degrees_xyz[2] * 3.14 / 180., cz = std::cos(z), sz = std::sin(z);
+inline fmat3 ExtrinsicEulerXYZ_to_SO3(fvec3 radians) {
+  auto x = radians.x, cx = std::cos(x), sx = std::sin(x);
+  auto y = radians.y, cy = std::cos(y), sy = std::sin(y);
+  auto z = radians.z, cz = std::cos(z), sz = std::sin(z);
   auto Rx = glm::fmat3{
       1,   0,   0,
       0,  cx,  sx,
       0, -sx,  cx,
   };
   auto Ry = glm::fmat3{
-      cy,   0, -sy,
+     cy,   0, -sy,
       0,   1,   0,
-      sy,   0,  cy,
+     sy,   0,  cy,
   };
   auto Rz = glm::fmat3{
-      cz,  sz,   0,
+     cz,  sz,   0,
     -sz,  cz,   0,
       0,   0,   1,
   };
   return Rz * Ry * Rx;
 }
+
+// Range
+// - x \in [       0,     pi]
+// - y \in [- pi / 2, pi / 2]
+// - z \in [    - pi,     pi]
+inline fvec3 SO3_to_ExtrinsicXYZ(fmat3 A) {
+  constexpr auto pi = glm::pi<float>();
+  auto clamp = [](float f) { return glm::clamp(f, -1.f, 1.f); }; // assure z \in [-1, 1] for acos(z)
+  fvec3 r;
+
+  //
+  // Extrinsic rotation applied to e1 and e3 (x and z)
+  //    rx      ry       rz
+  // x  ==  x' ---> x'' ---> x''' (= v)
+  // z ---> z' ---> z'' ---> z'''
+  //       (= u)
+  //
+
+  // 1. Derive angles ry and rz from spherical coordinate of v
+  fvec3 v = A[0];
+  r.y = acos(clamp(v.z)) - pi / 2.f;
+  r.z = atan2(v.y, v.x);
+
+  // 2. Invert A by ry and rz, then find rx from sperical coordinate of u
+  auto getR = ExtrinsicEulerXYZ_to_SO3;
+  fvec3 u = getR({0, -r.y, 0}) * getR({0, 0, -r.z}) * A[2];
+  u = glm::normalize(u); // assure u.z \in [-1, 1]
+  r.x = acos(clamp(u.z)); // \in [0, pi]
+
+  return r;
+}
+
+inline fmat3 UnitQuaternion_to_SO3(fvec4 q) {
+  TOY_ASSERT_CUSTOM(false, "Not implemented");
+  // TODO
+  // 1. apply q to e1, e2, e3
+  return {};
+}
+inline fvec4 SO3_to_UnitQuaternion(fmat3 so3) {
+  TOY_ASSERT_CUSTOM(false, "Not implemented");
+  // TODO
+  // 1. compute eigenvector u (up to scalar unless so3 = I)
+  // 2. compute rotation in orthogonal space of span{u}
+  return {};
+}
+
+inline std::tuple<fvec3, fvec3, fvec3> decomposeTransform(const fmat4& xform) {
+  fmat3 A = xform;
+  fmat3 R;
+  fvec3 s;
+  float h;
+  //
+  // Decomposition of rotation and scale.
+  // - Find A = R * s * h where
+  //   - R: SO(3)
+  //   - s: diagonal (scale without sign)
+  //   - h: sign (handedness)
+  //
+  // - 1. h = sign(det(A))
+  // - 2. s_i = |A e_i|
+  // - 3. R = A * inv(s * h)
+  //
+  h = glm::sign(glm::determinant(A));
+  if (h == 0) { h = 1; }
+
+  s = { (glm::dot(A[0], A[0]) > 0) ? glm::length(A[0]) : glm::epsilon<float>(),
+        (glm::dot(A[1], A[1]) > 0) ? glm::length(A[1]) : glm::epsilon<float>(),
+        (glm::dot(A[2], A[2]) > 0) ? glm::length(A[2]) : glm::epsilon<float>(), };
+
+  R = { A[0] * h / s.x,   A[1] * h / s.y,   A[2] * h / s.z };
+
+  return {
+      h * s,                  // (signed) scale
+      SO3_to_ExtrinsicXYZ(R), // rotation
+      xform[3],               // translation
+  };
+}
+
+inline fmat4 composeTransform(const fvec3 s, const fvec3 r, const fvec3 t) {
+  fmat3 R = ExtrinsicEulerXYZ_to_SO3(r);
+  return { {R[0] * s.x, 0},
+           {R[1] * s.y, 0},
+           {R[2] * s.z, 0},
+           {         t, 1}, };
+}
+
+//
+// ImGui widgets
+//
+
+namespace imgui {
+
+enum class InputTransformFlag : uint8_t {
+  Rotation_ExtrinsicXYZ   = 1 << 0,
+  Rotation_UnitQuaternion = 1 << 1, // TODO
+};
+
+// TODO: own a copy of transform in order to avoid `SO3_to_ExtrinsicXYZ` range restriction
+inline bool InputTransform(
+    fmat4& xform,
+    InputTransformFlag flags = InputTransformFlag::Rotation_ExtrinsicXYZ) {
+  auto _ = ImScoped::ID(fmt::format("{}-{}-{}", __FILE__, __LINE__, (void*)&xform).data());
+  auto [s, r, t] = decomposeTransform(xform);
+  fvec3 rdeg = glm::degrees(r);
+  bool changed = false;
+  changed |= ImGui::DragFloat3("Location",       (float*)&t,    .05);
+  changed |= ImGui::DragFloat3("Rotation (deg)", (float*)&rdeg, .50);
+  changed |= ImGui::DragFloat3("Scale",          (float*)&s,    .05);
+  if (changed) {
+    xform = composeTransform(s, glm::radians(rdeg), t);
+  }
+  return changed;
+};
+
+} // imgui
+
 
 //
 // Mesh examples
@@ -213,6 +331,7 @@ inline vector<T> Quads_to_Triangles(const vector<T>& quad_indices) {
   return result;
 };
 
+// TODO: superceded by scene::gltf in scene.hpp
 // cf. https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md
 struct GltfData {
 
