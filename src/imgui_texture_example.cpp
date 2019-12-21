@@ -167,7 +167,7 @@ struct App {
 
   App(const std::vector<std::string>& filenames) {
     window_.reset(new Window{"My Window", {800, 600}, { .gl_debug = true }});
-    window_->drop_callback_ = [&](std::vector<std::string>& paths) {
+    window_->drop_callback_ = [&](const std::vector<std::string>& paths) {
       command_queue_.emplace_back([this, paths]() {
         for (auto& path : paths) {
           textures_.emplace_back(new ImageTexture{path, true});

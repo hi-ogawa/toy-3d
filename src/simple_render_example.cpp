@@ -253,7 +253,7 @@ void main() {
 
     // setup uniforms
     glUseProgram(program_->handle_);
-    program_->setUniform("view_inv_xform_", utils::inverse(camera_->transform_));
+    program_->setUniform("view_inv_xform_", utils::inverseTR(camera_->transform_));
     program_->setUniform("view_projection_", camera_->getPerspectiveProjection());
     program_->setUniform("base_color_tex_", 0);
 
@@ -313,7 +313,7 @@ struct PropertyPanel : Panel {
         static fvec3 angles_;
         auto updated = ImGui::DragFloat3("##model-rot", (float*)&angles_, .5);
         if (updated) {
-          auto so3 = utils::ExtrinsicEulerXYZ_to_SO3(angles_);
+          auto so3 = utils::ExtrinsicEulerXYZ_to_SO3(glm::radians(angles_));
           model->transform_[0] = {so3[0], 0};
           model->transform_[1] = {so3[1], 0};
           model->transform_[2] = {so3[2], 0};

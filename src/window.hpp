@@ -38,6 +38,7 @@ struct Window {
   ImGuiContext* imgui_context_;
   ImGuiIO* io_; // it tracks MousePos, DisplaySize, etc...
   std::optional<std::function<void(const std::vector<std::string>&)>> drop_callback_;
+  bool wait_event_ = false;
 
   static void dropCallback(GLFWwindow* glfw_window, int path_count, const char* paths[]) {
     std::vector<std::string> _paths;
@@ -109,7 +110,7 @@ struct Window {
   }
 
   void newFrame() {
-    glfwPollEvents();
+    wait_event_ ? glfwWaitEvents() : glfwPollEvents();
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
