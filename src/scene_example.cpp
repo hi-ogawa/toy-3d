@@ -96,12 +96,10 @@ struct SceneManager {
     for (auto& node : new_assets->nodes_) {
       scene_->nodes_.push_back(node);
     }
+    renderer_->updateRenderResouce(*scene_);
   }
 
   void draw() {
-    // Setup
-    renderer_->updateRenderResouce(*scene_);
-
     // bind non-default framebuffer
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer_->framebuffer_handle_);
 
@@ -122,6 +120,11 @@ struct SceneManager {
   }
 };
 
+
+//
+// UIs
+//
+
 struct RenderPanel : Panel {
   constexpr static const char* type = "Render";
   gl::Framebuffer& fb_;
@@ -138,14 +141,101 @@ struct RenderPanel : Panel {
   }
 };
 
+struct AssetsPanel : Panel {
+  constexpr static const char* type = "Assets";
+  SceneManager& mng_;
+  string filename_;
+
+  AssetsPanel(SceneManager& mng) : mng_{mng}, filename_{""} {
+    filename_.reserve(128);
+  }
+
+  void UI_GltfImporter() {
+    auto dd_active = ImGui::GetCurrentContext()->DragDropActive;
+    if (!dd_active) {
+      ImGui::InputTextWithHint("", "Type .gltf file or drag&drop here", filename_.data(), filename_.capacity() + 1);
+    } else {
+      auto _ = ImScoped::StyleColor(ImGuiCol_Button, ImGui::GetColorU32(ImGuiCol_ButtonHovered));
+      ImGui::Button("DROP A FILE HERE", {ImGui::CalcItemWidth(), 0});
+      auto clicked = ImGui::IsItemClicked();
+      if (auto _ = ImScoped::DragDropTarget()) {
+        auto const_payload = ImGui::AcceptDragDropPayload("CUSTOM_FILE", ImGuiDragDropFlags_AcceptBeforeDelivery);
+        auto payload = const_cast<struct ImGuiPayload*>(const_payload);
+        auto drag_drop_files = reinterpret_cast<vector<string>**>(payload->Data);
+        if (payload) {
+          if (clicked) {
+            filename_ = (**drag_drop_files)[0];
+            (**drag_drop_files).clear();
+            payload->Delivery = true;
+          } else {
+            payload->Delivery = false;
+          }
+        }
+      }
+    }
+    ImGui::SameLine();
+    auto _ = ImScoped::StyleColor(ImGuiCol_Text, ImGui::GetColorU32(dd_active ? ImGuiCol_TextDisabled : ImGuiCol_Text));
+    if (ImGui::ButtonEx("LOAD", {0, 0}, dd_active ? ImGuiButtonFlags_Disabled : 0)) {
+      try {
+        // TODO: we can defer actual loading somewhere else
+        mng_.loadGltf(filename_.data());
+        filename_ = "";
+      } catch (std::runtime_error e) {
+        fmt::print("=== exception ===\n{}\n", e.what());
+      }
+    }
+  }
+
+  void UI_Scene() {
+    for (auto& node : mng_.scene_->nodes_) {
+      auto _ = ImScoped::ID(node.get());
+      if (auto _ = ImScoped::TreeNodeEx(node->name_.data(), ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::DragFloat3("Location##loc", (float*)&node->transform_[3], .05);
+
+        // TODO: scale
+        // TODO: angles_ are shared for all nodes
+        static fvec3 angles_;
+        auto updated = ImGui::DragFloat3("Rotation##rot", (float*)&angles_, .5);
+        if (updated) {
+          auto so3 = utils::ExtrinsicEulerXYZ_to_SO3(angles_);
+          node->transform_[0] = {so3[0], 0};
+          node->transform_[1] = {so3[1], 0};
+          node->transform_[2] = {so3[2], 0};
+        }
+      }
+    }
+
+    if (auto _ = ImScoped::TreeNodeEx("Camera", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::DragFloat3("Location##camera-loc", (float*)&mng_.scene_->camera_.transform_[3], .05);
+    }
+  }
+
+  void processUI() override {
+    if (auto _ = ImScoped::TreeNodeEx("Scene", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
+      auto __ = ImScoped::ID(__LINE__);
+      UI_Scene();
+    }
+
+    if (auto _ = ImScoped::TreeNodeEx("Import gltf", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
+      auto __ = ImScoped::ID(__LINE__);
+      UI_GltfImporter();
+    }
+  }
+};
+
 struct App {
   unique_ptr<toy::Window> window_;
   unique_ptr<PanelManager> panel_manager_;
   unique_ptr<SceneManager> scene_manager_;
+  vector<string> drag_drop_files_;
   bool done_ = false;
 
   App() {
     window_.reset(new Window{"My Window", {800, 600}, { .gl_debug = true, .hint_maximized = true }});
+    window_->drop_callback_ = [&](const vector<string>& paths) {
+      drag_drop_files_ = paths;
+    };
+
     scene_manager_.reset(new SceneManager);
 
     // load asssets
@@ -160,13 +250,15 @@ struct App {
 
     panel_manager_->registerPanelType<RenderPanel>([&]() {
         return new RenderPanel{*scene_manager_->framebuffer_}; });
+    panel_manager_->registerPanelType<AssetsPanel>([&]() {
+        return new AssetsPanel{*scene_manager_}; });
 
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, MetricsPanel::type);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, DemoPanel::type, 0.6);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, RenderPanel::type, 0.4);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, AssetsPanel::type);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, RenderPanel::type, 0.5);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, DemoPanel::type, 0.5);
   }
 
-  void processMainMenuBar() {
+  void UI_MainMenuBar() {
     auto _ = ImScoped::StyleVar(ImGuiStyleVar_FramePadding, {4, 6});
     if (auto _ = ImScoped::MainMenuBar()) {
       if (auto _ = ImScoped::Menu("Menu")) {
@@ -178,8 +270,26 @@ struct App {
     }
   }
 
+  void UI_DropSource() {
+    if (!drag_drop_files_.empty()) {
+      ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+      auto _ = ImScoped::DragDropSource(ImGuiDragDropFlags_SourceExtern);
+      auto ptr = &drag_drop_files_;
+      ImGui::SetDragDropPayload("CUSTOM_FILE", &ptr, (sizeof ptr));
+      ImGui::Text("Click to drop files (ESC to cancel)");
+      for (auto& file : drag_drop_files_) {
+        auto _ = ImScoped::ID(&file);
+        ImGui::BulletText("%s", file.data());
+      }
+      if (ImGui::IsKeyPressedMap(ImGuiKey_Escape)) {
+        drag_drop_files_ = {};
+      }
+    }
+  }
+
   void processUI() {
-    processMainMenuBar();
+    UI_MainMenuBar();
+    UI_DropSource();
     panel_manager_->processUI();
   }
 

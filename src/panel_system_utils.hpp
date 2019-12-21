@@ -117,6 +117,8 @@ struct TestPanel : Panel {
       auto clicked = ImGui::IsItemClicked();
 
       if (ImGui::BeginDragDropTarget()) {
+        // By default, `AcceptDragDropPayload` only returns value when !mousedown.
+        // here `ImGuiDragDropFlags_AcceptBeforeDelivery` forces it to always return payload if any.
         auto const_payload = ImGui::AcceptDragDropPayload("CUSTOM2", ImGuiDragDropFlags_AcceptBeforeDelivery);
         auto payload = const_cast<struct ImGuiPayload*>(const_payload);
         if (payload) {

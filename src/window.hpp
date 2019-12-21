@@ -37,7 +37,7 @@ struct Window {
   std::string name_;
   ImGuiContext* imgui_context_;
   ImGuiIO* io_; // it tracks MousePos, DisplaySize, etc...
-  std::optional<std::function<void(std::vector<std::string>&)>> drop_callback_;
+  std::optional<std::function<void(const std::vector<std::string>&)>> drop_callback_;
 
   static void dropCallback(GLFWwindow* glfw_window, int path_count, const char* paths[]) {
     std::vector<std::string> _paths;
@@ -47,6 +47,7 @@ struct Window {
     auto _this = reinterpret_cast<Window*>(glfwGetWindowUserPointer(glfw_window));
     if (_this->drop_callback_) {
       (*_this->drop_callback_)(_paths);
+      glfwFocusWindow(glfw_window);
     }
   }
 

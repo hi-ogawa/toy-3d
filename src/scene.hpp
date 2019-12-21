@@ -1,3 +1,5 @@
+#pragma once
+
 #include <cgltf.h>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <stb_image.h>
