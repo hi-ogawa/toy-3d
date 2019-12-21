@@ -289,11 +289,12 @@ from editor,
     - [x] node/camera transform editor
       - [x] location
       - [x] rotation and scale
+      - [x] free-range extrinsic rotation
+    - [@] node picker from 3d viewport
     - [ ] scene node list as different tab
     - [ ] asset list
       - add/remove nodes from scene
     - [ ] simple procedual mesh/textures
-    - [ ] node picker from 3d viewport
     - [ ] log panel
 
 ```

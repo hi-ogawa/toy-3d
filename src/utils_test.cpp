@@ -37,6 +37,16 @@ TEST(UtilsTest, composeTransform) {
       EXPECT_LT(glm::distance(degs_in, degs_out), 1e-4) << "NOTE [ i = " << i << " ]";
     }
   }
+
+  {
+    glm::fvec3 s = {1, 1, 1};
+    glm::fvec3 t = {0, 0, 0};
+
+    glm::fvec3 r = {-0.1, 0, 0};
+    glm::fmat4 xform = utils::composeTransform(s, r, t);
+    auto [_s, _r, _t] = utils::decomposeTransform(xform);
+    EXPECT_FLOAT_EQ(glm::distance(r, _r), 0);
+  }
 }
 
 TEST(UtilsTest, decomposeTransform) {

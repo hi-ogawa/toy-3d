@@ -178,9 +178,9 @@ inline fmat3 ExtrinsicEulerXYZ_to_SO3(fvec3 radians) {
 }
 
 // Range
-// - x \in [       0,     pi]
-// - y \in [- pi / 2, pi / 2]
-// - z \in [    - pi,     pi]
+// - x \in [  -pi,   pi]
+// - y \in [-pi/2, pi/2]
+// - z \in [  -pi,   pi]
 inline fvec3 SO3_to_ExtrinsicXYZ(fmat3 A) {
   constexpr auto pi = glm::pi<float>();
   auto clamp = [](float f) { return glm::clamp(f, -1.f, 1.f); }; // assure z \in [-1, 1] for acos(z)
@@ -203,7 +203,7 @@ inline fvec3 SO3_to_ExtrinsicXYZ(fmat3 A) {
   auto getR = ExtrinsicEulerXYZ_to_SO3;
   fvec3 u = getR({0, -r.y, 0}) * getR({0, 0, -r.z}) * A[2];
   u = glm::normalize(u); // assure u.z \in [-1, 1]
-  r.x = glm::acos(clamp(u.z)); // \in [0, pi]
+  r.x = atan2(-u.y, u.z); // \in [-pi, pi]
 
   return r;
 }
@@ -273,18 +273,40 @@ enum class InputTransformFlag : uint8_t {
   Rotation_UnitQuaternion = 1 << 1, // TODO
 };
 
-// TODO: own a copy of transform in order to avoid `SO3_to_ExtrinsicXYZ` range restriction
+struct InputTransformContext {
+  // For now, it seems easier to manage id by ourself for tracking activity,
+  // than using ImGui's built-in facility (Group, GetActiveId, ItemHoverable, etc...)
+  // since group will work for `IsItemActive` but not for `GetActiveID`
+  void* active_id;
+  fvec3 rdeg;
+};
+
+inline static InputTransformContext global_input_transform_context_;
+
 inline bool InputTransform(
     fmat4& xform,
-    InputTransformFlag flags = InputTransformFlag::Rotation_ExtrinsicXYZ) {
-  auto _ = ImScoped::ID(fmt::format("{}-{}-{}", __FILE__, __LINE__, (void*)&xform).data());
+    InputTransformFlag flags = InputTransformFlag::Rotation_ExtrinsicXYZ,
+    InputTransformContext& context = global_input_transform_context_) {
+  auto id = (void*)&xform;
+  auto _ = ImScoped::ID(id);
   auto [s, r, t] = decomposeTransform(xform);
-  fvec3 rdeg = glm::degrees(r);
+  fvec3 rdeg = context.active_id == id ? context.rdeg : glm::degrees(r);
   bool changed = false;
-  changed |= ImGui::DragFloat3("Location",       (float*)&t,    .05);
-  changed |= ImGui::DragFloat3("Rotation (deg)", (float*)&rdeg, .50);
-  changed |= ImGui::DragFloat3("Scale",          (float*)&s,    .05);
+  {
+    auto _g = ImScoped::Group();
+    changed |= ImGui::DragFloat3("Location",       (float*)&t,    .05);
+    changed |= ImGui::DragFloat3("Rotation (deg)", (float*)&rdeg, .50);
+    changed |= ImGui::DragFloat3("Scale",          (float*)&s,    .05);
+  }
+  if (ImGui::IsItemActivated()) {
+    context.rdeg = rdeg;
+    context.active_id = id;
+  }
+  if (ImGui::IsItemDeactivated()) {
+    context.active_id = nullptr;
+  }
   if (changed) {
+    context.rdeg = rdeg;
     xform = composeTransform(s, glm::radians(rdeg), t);
   }
   return changed;
