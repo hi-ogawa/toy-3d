@@ -73,7 +73,7 @@ inline std::ostream& operator<<(std::ostream& os, const glm::fmat4& A) {
 
 namespace toy { namespace utils {
 
-using namespace glm; // TODO: explicitly write down
+using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat3, glm::fmat4;
 using std::vector, std::string;
 
 struct RangeHelper {
@@ -196,14 +196,14 @@ inline fvec3 SO3_to_ExtrinsicXYZ(fmat3 A) {
 
   // 1. Derive angles ry and rz from spherical coordinate of v
   fvec3 v = A[0];
-  r.y = acos(clamp(v.z)) - pi / 2.f;
+  r.y = glm::acos(clamp(v.z)) - pi / 2.f;
   r.z = atan2(v.y, v.x);
 
   // 2. Invert A by ry and rz, then find rx from sperical coordinate of u
   auto getR = ExtrinsicEulerXYZ_to_SO3;
   fvec3 u = getR({0, -r.y, 0}) * getR({0, 0, -r.z}) * A[2];
   u = glm::normalize(u); // assure u.z \in [-1, 1]
-  r.x = acos(clamp(u.z)); // \in [0, pi]
+  r.x = glm::acos(clamp(u.z)); // \in [0, pi]
 
   return r;
 }
