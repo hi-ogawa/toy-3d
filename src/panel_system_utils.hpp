@@ -1,4 +1,6 @@
 #include "panel_system.hpp"
+#include "utils.hpp"
+#include "utils_imgui.hpp"
 
 // Demo components from imgui_demo.cpp (`static` is removed to make them external linkage)
 void ShowDemoWindowWidgets();
@@ -43,6 +45,14 @@ struct DemoPanel : Panel {
 struct TestPanel : Panel {
   constexpr static const char* type = "Test";
   static Panel* newPanelFunc() { return dynamic_cast<Panel*>(new TestPanel); }
+  void processUI() override {
+    utils::imgui::CameraView();
+  }
+};
+
+struct xxxTestPanel : Panel {
+  constexpr static const char* type = "xxxTest";
+  static Panel* newPanelFunc() { return dynamic_cast<Panel*>(new xxxTestPanel); }
 
   struct DropContext1 {
     bool dropping = false;

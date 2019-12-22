@@ -10,9 +10,11 @@
 
 #include <fmt/format.h>
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <imgui_scoped.h>
 #include <glm/glm.hpp>
 #include <glm/ext/scalar_constants.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
 #include <GL/gl3w.h>
 #include <cgltf.h>
 
@@ -96,12 +98,12 @@ struct RangeHelper {
   Iterator end() { return Iterator{end_}; };
 };
 
-RangeHelper inline range(int stop) {
-  return RangeHelper{0, stop};
+RangeHelper inline range(int start, int stop) {
+  return RangeHelper{start, std::max(start, stop)};
 }
 
-RangeHelper inline range(int start, int stop) {
-  return RangeHelper{start, stop};
+RangeHelper inline range(int stop) {
+  return range(0, stop);
 }
 
 
@@ -261,59 +263,6 @@ inline fmat4 composeTransform(const fvec3 s, const fvec3 r, const fvec3 t) {
            {R[2] * s.z, 0},
            {         t, 1}, };
 }
-
-//
-// ImGui widgets
-//
-
-namespace imgui {
-
-enum class InputTransformFlag : uint8_t {
-  Rotation_ExtrinsicXYZ   = 1 << 0,
-  Rotation_UnitQuaternion = 1 << 1, // TODO
-};
-
-struct InputTransformContext {
-  // For now, it seems easier to manage id by ourself for tracking activity,
-  // than using ImGui's built-in facility (Group, GetActiveId, ItemHoverable, etc...)
-  // since group will work for `IsItemActive` but not for `GetActiveID`
-  void* active_id;
-  fvec3 rdeg;
-};
-
-inline static InputTransformContext global_input_transform_context_;
-
-inline bool InputTransform(
-    fmat4& xform,
-    InputTransformFlag flags = InputTransformFlag::Rotation_ExtrinsicXYZ,
-    InputTransformContext& context = global_input_transform_context_) {
-  auto id = (void*)&xform;
-  auto _ = ImScoped::ID(id);
-  auto [s, r, t] = decomposeTransform(xform);
-  fvec3 rdeg = context.active_id == id ? context.rdeg : glm::degrees(r);
-  bool changed = false;
-  {
-    auto _g = ImScoped::Group();
-    changed |= ImGui::DragFloat3("Location",       (float*)&t,    .05);
-    changed |= ImGui::DragFloat3("Rotation (deg)", (float*)&rdeg, .50);
-    changed |= ImGui::DragFloat3("Scale",          (float*)&s,    .05);
-  }
-  if (ImGui::IsItemActivated()) {
-    context.rdeg = rdeg;
-    context.active_id = id;
-  }
-  if (ImGui::IsItemDeactivated()) {
-    context.active_id = nullptr;
-  }
-  if (changed) {
-    context.rdeg = rdeg;
-    xform = composeTransform(s, glm::radians(rdeg), t);
-  }
-  return changed;
-};
-
-} // imgui
-
 
 //
 // Mesh examples

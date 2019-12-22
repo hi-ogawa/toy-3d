@@ -356,3 +356,21 @@ TODO simpler_render_example
 [ ] rendering model
   - https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md#appendix-b-brdf-implementation
 ```
+
+
+# 2019/12/21
+
+- 3d viewport interaction
+  - [ ] mouse coordinate -> z projected point -> 3d ray
+  - pivoted camera transform
+    - fixed "look-at"
+    - spherical coord theta-phi change
+  - cube/ray intersection
+  - sphere/ray intersection
+  - drawing axis/grid
+  - example
+    - [@] draw cube at origin with z-axis and xy-plaine
+    - [ ] camera transform 3d ui
+    - [ ] cube face hit testing
+    - [ ] draw sphere at origin
+    - [ ] sphere surface hit testing

@@ -2,6 +2,7 @@
 #include "panel_system.hpp"
 #include "panel_system_utils.hpp"
 #include "utils.hpp"
+#include "utils_imgui.hpp"
 #include "scene.hpp"
 
 namespace toy {
