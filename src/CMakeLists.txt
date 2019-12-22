@@ -2,15 +2,20 @@ find_package(PkgConfig)
 pkg_check_modules(GLM REQUIRED glm)
 pkg_search_module(GTEST REQUIRED gtest)
 
+set(GLTF_MODEL_DIR "${CMAKE_SOURCE_DIR}/../../others/glTF-Sample-Viewer/assets/models"
+    CACHE PATH "local directly of gltf model repository")
+
 # dependencies
 link_libraries(glfw gl3w imgui fmt stb cgltf)
 
+# include dirs (only for <imgui_user_config.h>)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 # defines
-set(GLTF_MODEL_DIR "${CMAKE_SOURCE_DIR}/../../others/glTF-Sample-Viewer/assets/models"
-    CACHE PATH "local directly of gltf model repository")
 add_compile_definitions(
   TOY_DIR="${CMAKE_SOURCE_DIR}"
   GLTF_MODEL_DIR="${GLTF_MODEL_DIR}"
+  IMGUI_USER_CONFIG=<imgui_user_config.h> # cf ingui.h
 )
 
 # executables

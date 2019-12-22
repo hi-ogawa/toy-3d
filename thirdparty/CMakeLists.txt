@@ -46,7 +46,10 @@ set(IMGUI_INCLUDE_DIRS
   ${IMGUI_DIR}/misc/cpp # imgui_scoped.h
 )
 add_library(imgui ${IMGUI_SRCS})
-target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_LOADER_GL3W)
+target_compile_definitions(imgui PUBLIC
+  IMGUI_IMPL_OPENGL_LOADER_GL3W
+  IMGUI_DEFINE_MATH_OPERATORS # cf. ingui_internal.h
+)
 target_include_directories(imgui PUBLIC ${IMGUI_INCLUDE_DIRS})
 target_link_libraries(imgui PUBLIC gl3w glfw)
 

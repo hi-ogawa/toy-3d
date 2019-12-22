@@ -5,6 +5,46 @@
 
 using namespace toy;
 
+TEST(UtilsTest, ImVec2_glm) {
+  ImVec2 v1 = {2, 3};
+  glm::fvec2 v2 = {5, 7};
+  glm::ivec2 v3 = {11, 13};
+  #define VEC_EXPECT_EQ(V, X, Y) EXPECT_EQ(V.x, X); EXPECT_EQ(V.y, Y);
+  {
+    auto u = v1.glm();
+    static_assert(std::is_same<decltype(u), glm::fvec2>::value);
+    VEC_EXPECT_EQ(u, v1.x, v1.y);
+  }
+  {
+    glm::ivec2 u = v1.glm();
+    VEC_EXPECT_EQ(u, v1.x, v1.y);
+  }
+  {
+    ImVec2 u = v2;
+    VEC_EXPECT_EQ(u, v2.x, v2.y);
+  }
+  {
+    // ImVec2 u = v3; // compiler error
+    auto u = ImVec2{v3};
+    VEC_EXPECT_EQ(u, v3.x, v3.y);
+  }
+  {
+    auto u = v1 + v2;
+    VEC_EXPECT_EQ(u, v1.x + v2.x, v1.y + v2.y);
+  }
+  {
+    // auto u = v1 + v3; // compile error
+    auto u = v1 + ImVec2{v3};
+    VEC_EXPECT_EQ(u, v1.x + v3.x, v1.y + v3.y);
+  }
+  {
+    // auto u = v2 + v3; // compile error
+    auto u = v2 + glm::fvec2{v3};
+    VEC_EXPECT_EQ(u, v2.x + v3.x, v2.y + v3.y);
+  }
+  #undef VEC_EXPECT_EQ
+}
+
 TEST(UtilsTest, Cli1) {
   int argc = 6;
   const char* argv[] = {"some_program", "--force", "-n", "2", "xxx", "yyy"};
