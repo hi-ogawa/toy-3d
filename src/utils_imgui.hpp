@@ -73,8 +73,12 @@ inline bool InputTransform(
 // - [x] camera interaction
 //   - [x] rotation around vertical axis
 //   - [x] zoom
-// - [@] draw cube with colored surface (imgui draw convex fill)
-// - [ ] draw sphere
+//   - [@] move
+//   - [ ] stateful ui (use GetMouseDragDelta instead of MouseDelta)
+// - [x] draw plane with imgui PathFillConvex
+// - [x] plane hit testing
+// - [@] draw sphere with great circles of axis section
+// - [@] explore imgui primitive anti-aliasing method
 // - [ ] sphere surface hit testing with drawing normal and tangent surface
 // - [ ] 3d primitive clipping
 
@@ -82,8 +86,8 @@ struct CameraViewContext {
   fvec2 viewport = {400, 400};
   fvec3 position = {2.5, 2.5, 2.5}; // support spherical coord mode
   float yfov = 3.14 * 2 / 3;
-  int axis_bound = 2;
-  int grid_division = 1;
+  int axis_bound = 3;
+  int grid_division = 2;
   int show_axis[3] = {1, 1, 1};
   int show_grid[3] = {0, 1, 0};
   // cube mode, sphere mode
@@ -96,7 +100,6 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
   //
   // Property input
   //
-  if (ig::Button("Reset")) { ctx = {}; }
   ig::DragFloat("yfov", &ctx.yfov, 0.01f);
   ig::InputInt("axis_bound", &ctx.axis_bound);
   ig::InputInt("grid_division", &ctx.grid_division);
@@ -130,7 +133,7 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
   fmat4 inv_view_xform = inverseTR(view_xform);
 
   //
-  // Drawing
+  // Viewport setup
   //
   auto window = ig::GetCurrentWindow();
   auto draw = window->DrawList;
@@ -140,21 +143,24 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
   if (!ig::ItemAdd(bb, 0)) { return; };
 
   auto id = window->GetID(__FILE__);
-  auto hovered = ig::ItemHoverable(ImRect(bb.Min, bb.Max), id);
+  auto active = ig::ItemHoverable(ImRect(bb.Min, bb.Max), id);
 
   // frame rect
   ig::RenderFrame(bb.Min, bb.Max, ig::GetColorU32(ImGuiCol_FrameBg));
 
-  // move camera around origin
-  // TODO: DragFloat like behaviour (i.e. hovered is not necessary)
-  if (hovered && ig::IsMouseDragging(0)) {
+  // camera transform ui
+  if (active && ig::IsMouseDragging(0)) {
     auto v = io.MouseDelta / ctx.viewport;
+
+    // zoom
     if (ig::GetIO().KeyAlt) {
-      constexpr float m = 2.5, M = 10;
+      constexpr float m = 1.5, M = 10;
       auto dl = -v.x * (M - m);
       auto l = glm::length(ctx.position);
       ctx.position *= glm::clamp(l + dl, m, M) / l;
-    } else {
+    }
+    // rotation
+    if (ig::GetIO().KeyCtrl) {
       v.x *= 2 * 3.14;
       v.y *= 3.14;
       if (v.x != 0 || v.y != 0) {
@@ -163,13 +169,25 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
         ctx.position = A * ctx.position;
       }
     }
+    // move (TODO)
+    if (ig::GetIO().KeyShift) {
+
+    }
   }
 
   auto project_3d = [&](const fvec3& p) -> ImVec2 {
-    auto v = projection * inv_view_xform * fvec4{p, 1};
-    auto u = fvec2{v.x, v.y} / v.w; // TODO: clip primitive
-    auto w = (((glm::fmat2{{1, 0}, {0, -1}} * u) + fvec2{1, 1}) / 2) * (bb.Max - bb.Min) + bb.Min;
+    auto v = projection * inv_view_xform * fvec4{p, 1};                           // aka clip coord
+    auto u = fvec2{v.x, v.y} / v.w; // TODO: clip primitive                       //     ND coord
+    auto w = ((fvec2{u.x, -u.y} + fvec2{1, 1}) / 2) * (bb.Max - bb.Min) + bb.Min; //     window coord
     return w;
+  };
+
+  auto rev_project_3d = [&](const ImVec2& w) -> fvec3 {
+    auto s = fvec2{projection[0][0], projection[1][1]};
+    auto _u = ((w - bb.Min) / (bb.Max - bb.Min)) * 2 - ImVec2{1, 1};
+    auto u = fvec2{_u.x, -_u.y};
+    auto p = fvec3{view_xform * fvec4{u / s, -1, 1}};
+    return p;
   };
 
   // Axis
@@ -233,7 +251,53 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
     }
   }
 
-  // Cube
+  // Plane at z = 1
+  {
+    fvec3 p[4] = { {1, 1, 1}, {-1, 1, 1}, {-1, -1, 1}, {1, -1, 1} };
+    // ImGui applies anti-aliasing for CW face so we order points based on
+    // whether plane faces to camera (i.e. position wrt plane's frame).
+    fmat4 model_xform = { {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 1, 0} };
+    bool ccw = (inverseTR(model_xform) * fvec4(ctx.position, 1)).z > 0;
+    draw->PathClear();
+    for (auto i = (ccw ? 3 : 0); i != (ccw ? -1 : 4); i += (ccw ? -1 : 1)) {
+      draw->PathLineTo(project_3d(p[i]));
+    }
+    draw->PathFillConvex(ig::GetColorU32({0, 0, 1, .8}));
+
+    bool _debug_ccw = true;
+    if (_debug_ccw) {
+      draw->AddCircleFilled(
+          project_3d({0, 0, 1}), 4.f,
+          ig::GetColorU32(ccw ? ImVec4{1, 1, 0, 1} : ImVec4{1, 0, 1, 1}));
+    }
+  }
+
+  // Mouse position in world frame
+  bool _debug_rev_project = true;
+  if (active && _debug_rev_project) {
+    auto p = rev_project_3d(ig::GetMousePos());
+    draw->AddCircleFilled(project_3d(p), 3.f, ig::GetColorU32({0, 1, 1, 1}));
+  }
+
+  // Hit testing plane
+  if (active) {
+    auto& camera = ctx.position;
+    auto mouse_ray = rev_project_3d(ig::GetMousePos()) - camera;
+    auto t = hit::Line_Plane(camera, mouse_ray, {0, 0, 1}, {0, 0, 1});
+    if (t && *t > 0) {
+      auto intersection =  camera + (*t) * mouse_ray;
+      bool rect_hit; {
+        auto v = intersection - fvec3{0, 0, 1};
+        rect_hit = glm::max(glm::abs(v.x), glm::abs(v.y)) < 1;
+      }
+      draw->AddLine(
+          project_3d({0, 0, 0}), project_3d(intersection),
+          rect_hit ? ig::GetColorU32({0, 1, 1, .8}) : ig::GetColorU32({0, 1, 1, .3}),
+          rect_hit ? 3.f : 1.f);
+    }
+  }
+
+  // Sphere with great circle
 }
 
 } // imgui

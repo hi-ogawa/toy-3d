@@ -40,6 +40,11 @@ struct App {
           done_ = true;
         }
       }
+      if (auto _ = ImScoped::Menu("Window")) {
+        if (ImGui::MenuItem("WaitEvents", nullptr, /*selected*/ window_->wait_event_)) {
+          window_->wait_event_ = !window_->wait_event_;
+        }
+      }
     }
   }
 

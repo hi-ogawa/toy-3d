@@ -142,6 +142,39 @@ inline EnumerateHelper<T> enumerate(T container[], size_t size) {
   return EnumerateHelper<T>{0, size, container};
 }
 
+// Primitive closest point (aka closed convex projection theorem)
+
+namespace hit {
+
+// @return t where p + t v is intersection unless <v, n> = 0
+inline std::optional<float> Line_Plane(
+    fvec3 p, // line point
+    fvec3 v, // ray vector
+    fvec3 q, // plane point
+    fvec3 n  // plane normal
+  ) {
+  // <(p + t v) - q, n> = 0  <=>  t <v, n> = <q - p, n>
+  auto a = glm::dot(v, n);
+  auto b = glm::dot(q - p, n);
+  if (glm::abs(a) < glm::epsilon<float>()) { return {}; }
+  return b / a;
+}
+
+// @return t where p + t v is closest point
+inline float Line_Point(
+    fvec3 p, // line point
+    fvec3 v, // ray vector
+    fvec3 q  // point
+  ) {
+  // <(p + t v) - q, v> = 0  <=>  t <v, v> = <q - p, v>
+  auto a = glm::dot(v, v);
+  TOY_ASSERT(glm::abs(a) > glm::epsilon<float>());
+  auto b = glm::dot(q - p, v);
+  return b / a;
+}
+
+} // hit
+
 
 //
 // inverse in euclidian group SO(3) x R^3 (aka translation and rotation)
