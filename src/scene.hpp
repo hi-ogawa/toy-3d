@@ -17,8 +17,10 @@
 namespace toy {
 namespace scene {
 
+namespace {
 using std::string, std::vector, std::shared_ptr, std::unique_ptr;
 using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat3, glm::fmat4;
+}
 
 struct MeshRR; struct TextureRR;
 struct Node; struct Mesh; struct Texture; struct Material;

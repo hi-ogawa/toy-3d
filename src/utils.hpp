@@ -75,8 +75,10 @@ inline std::ostream& operator<<(std::ostream& os, const glm::fmat4& A) {
 
 namespace toy { namespace utils {
 
+namespace {
 using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat3, glm::fmat4;
 using std::vector, std::string;
+}
 
 struct RangeHelper {
   int start_, end_;
@@ -142,17 +144,17 @@ inline EnumerateHelper<T> enumerate(T container[], size_t size) {
   return EnumerateHelper<T>{0, size, container};
 }
 
-// Primitive closest point (aka closed convex projection theorem)
+// Primitive closest point (cf. closed convex projection theorem)
 
 namespace hit {
 
-// @return t where p + t v is intersection unless <v, n> = 0
-inline std::optional<float> Line_Plane(
-    fvec3 p, // line point
-    fvec3 v, // ray vector
-    fvec3 q, // plane point
-    fvec3 n  // plane normal
-  ) {
+inline auto Line_Plane(
+    const fvec3& p, // line point
+    const fvec3& v, // ray vector
+    const fvec3& q, // plane point
+    const fvec3& n  // plane normal
+)-> std::optional<float> // t where p + t v is intersection unless <v, n> = 0
+{
   // <(p + t v) - q, n> = 0  <=>  t <v, n> = <q - p, n>
   auto a = glm::dot(v, n);
   auto b = glm::dot(q - p, n);
@@ -160,17 +162,125 @@ inline std::optional<float> Line_Plane(
   return b / a;
 }
 
-// @return t where p + t v is closest point
-inline float Line_Point(
-    fvec3 p, // line point
-    fvec3 v, // ray vector
-    fvec3 q  // point
-  ) {
+inline auto Line_Point(
+    const fvec3& p, // line point
+    const fvec3& v, // ray vector
+    const fvec3& q  // point
+)-> float // t where p + t v is closest point
+{
   // <(p + t v) - q, v> = 0  <=>  t <v, v> = <q - p, v>
   auto a = glm::dot(v, v);
   TOY_ASSERT(glm::abs(a) > glm::epsilon<float>());
   auto b = glm::dot(q - p, v);
   return b / a;
+}
+
+inline auto _isSmall(float f) { return glm::abs(f) < glm::epsilon<float>(); }
+
+inline auto Line_Plane_4D(
+    const fvec4& p, // line point
+    const fvec4& v, // ray vector
+    const fvec4& q, // plane point
+    const fvec4& n  // plane normal
+)-> std::optional<float> // t where p + t v is intersection unless <v, n> = 0
+{
+  // <(p + t v) - q, n> = 0  <=>  t <v, n> = <q - p, n>
+  auto a = glm::dot(v, n);
+  auto b = glm::dot(q - p, n);
+  if (glm::abs(a) < glm::epsilon<float>()) { return {}; }
+  return b / a;
+}
+
+// ClipVolume = { (x, w) \in R^3 x R | w >=0 and \forall i. |x_i| <= w }
+inline auto Line_ClipVolume(
+    const fvec4& p, // line point
+    const fvec4& v  // ray vector with v.w >= 0
+)-> std::optional<std::pair<float, float>>
+    // t_in <= t_out where p + t v \in Boundary(ClipVolume)
+    // t_out = FLT_MAX means ray doesn't get out (i.e. intersect at infinity).
+{
+  // fmt::print("p = ({}, {}, {}, {}), v = ({}, {}, {}, {})\n",
+  //     p.x, p.y, p.z, p.w, v.x, v.y, v.z, v.w);
+
+  float t_in_ = -FLT_MAX, t_out_ = FLT_MAX;
+
+  auto _subRoutine = [&p, &v, &t_in_, &t_out_](
+    const std::optional<float>& t1,
+    const std::optional<float>& t2
+  ) {
+    vector<float> ts; // float ts[2];
+    if (t1) {
+      auto q = p + (*t1) * v;
+      if (q.w >= 0) {
+        ts.push_back(*t1);
+      }
+    }
+    if (t2) {
+      auto q = p + (*t2) * v;
+      if (q.w >= 0) {
+        ts.push_back(*t2);
+      }
+    }
+    if (ts.size() == 2) {
+      // TODO:
+      // for now, ad-hocly handle t1 ~= t2 (which happens for exact y-axis (p.x = v.x = 0))
+      // probably, it needs to check if e.g. v.w > v.x (otherwise it doesn't go inside ClipVolume)
+      if (_isSmall(ts[0] - ts[1])) {
+        t_in_ = std::max(t_in_,  ts[0]);
+        return;
+      }
+
+      auto m = ts[0] < ts[1] ? ts[0] : ts[1];
+      auto M = ts[0] < ts[1] ? ts[1] : ts[0];
+      t_in_  = std::max(t_in_,  m);
+      t_out_ = std::min(t_out_, M);
+    } else if (ts.size() == 1) {
+      t_in_ = std::max(t_in_, ts[0]);
+    }
+  };
+
+  _subRoutine(
+      Line_Plane_4D(p, v, {0, 0, 0, 0}, {1, 0, 0,-1}),  // x = +w plane
+      Line_Plane_4D(p, v, {0, 0, 0, 0}, {1, 0, 0, 1})); // x = -w plane
+  _subRoutine(
+      Line_Plane_4D(p, v, {0, 0, 0, 0}, {0, 1, 0,-1}),  // y = +w plane
+      Line_Plane_4D(p, v, {0, 0, 0, 0}, {0, 1, 0, 1})); // y = -w plane
+  _subRoutine(
+      Line_Plane_4D(p, v, {0, 0, 0, 0}, {0, 0, 1,-1}),  // z = +w plane
+      Line_Plane_4D(p, v, {0, 0, 0, 0}, {0, 0, 1, 1})); // z = -w plane
+
+  if (t_in_ == FLT_MIN) { return {}; }
+  return std::make_pair(t_in_, t_out_);
+};
+
+// this takes only p.w <= q.w
+inline std::optional<std::pair<fvec4, fvec4>> _clipLineSegment(
+    const fvec4& p, const fvec4& q) {
+  auto v = q - p;
+  auto t_in_out = Line_ClipVolume(p, v);
+  if (!t_in_out) { return {}; }
+
+  auto& [t_in, t_out] = *t_in_out;
+  if (1 < t_in) { return {}; }
+  if (t_out < 0) {
+    fmt::print("p = ({}, {}, {}, {}), v = ({}, {}, {}, {})\n",
+        p.x, p.y, p.z, p.w, v.x, v.y, v.z, v.w);
+    fmt::print("(t_in, t_out) = ({}, {})\n", t_in, t_out);
+    return {};
+  }
+
+  fvec4 p_in = p + std::max(0.f, t_in) * v;
+  fvec4 q_out = p + std::min(t_out, 1.f) * v;
+  return std::make_pair(p_in, q_out);
+}
+
+inline std::optional<std::pair<fvec4, fvec4>> clipLineSegment(
+    const fvec4& p, const fvec4& q) {
+  bool flip = p.w > q.w;
+  auto tmp = _clipLineSegment(flip ? q : p, flip ? p : q);
+  if (!tmp) { return {}; }
+  auto& [r, s] = *tmp;
+  return std::make_pair(flip ? s : r, flip ? r : s);
 }
 
 } // hit

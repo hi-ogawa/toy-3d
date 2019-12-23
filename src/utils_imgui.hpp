@@ -76,11 +76,12 @@ inline bool InputTransform(
 //   - [x] move
 // - [x] draw plane with imgui PathFillConvex
 // - [x] plane hit testing
-// - [ ] 3d primitive clipping
-//   - [ ] theory (projective space, convexity preservation, etc...)
-//   - [@] line
+// - [x] 3d primitive clipping
+//   - [x] theory (projective space, convexity preservation, etc...)
+//   - [x] line
+//   - [-] triangle
+// - [x] explore imgui primitive anti-aliasing method
 // - [@] draw sphere with great circles of axis section
-// - [@] explore imgui primitive anti-aliasing method
 // - [ ] sphere surface hit testing with drawing normal and tangent surface
 
 struct CameraViewContext {
@@ -88,10 +89,13 @@ struct CameraViewContext {
   fvec3 position = {2.5, 2.5, 2.5}; // support spherical coord mode
   fvec3 lookat = {0, 0, 0};
   float yfov = 3.14 * 2 / 3;
-  int axis_bound = 3;
-  int grid_division = 2;
+  float znear = 0.01;
+  float zfar = 100;
+  int axis_bound = 5;
+  int grid_division = 3;
   int show_axis[3] = {1, 1, 1};
   int show_grid[3] = {0, 1, 0};
+  bool clip_line = true;
 };
 
 inline static CameraViewContext global_camera_view_context_;
@@ -115,7 +119,7 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
   //
   // Transformation setup
   //
-  fmat4 projection = glm::perspectiveRH_NO(ctx.yfov, ctx.viewport[0] / ctx.viewport[1], 0.f, 0.f);
+  fmat4 projection = glm::perspectiveRH_NO(ctx.yfov, ctx.viewport[0] / ctx.viewport[1], ctx.znear, ctx.zfar);
   fmat4 view_xform;
   {
     // look at origin from "position" with new frame x' y' z' such that:
@@ -180,11 +184,15 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
     }
   }
 
-  auto project_3d = [&](const fvec3& p) -> ImVec2 {
-    auto v = projection * inv_view_xform * fvec4{p, 1};                           // aka clip coord
-    auto u = fvec2{v.x, v.y} / v.w; // TODO: clip primitive                       //     ND coord
+  auto clip_coord_to_window_coord = [&bb](const fvec4& v) -> ImVec2 {
+    auto u = fvec2{v.x, v.y} / v.w;                                               //     ND coord
     auto w = ((fvec2{u.x, -u.y} + fvec2{1, 1}) / 2) * (bb.Max - bb.Min) + bb.Min; //     window coord
     return w;
+  };
+
+  auto project_3d = [&projection, &inv_view_xform, &clip_coord_to_window_coord](const fvec3& p) -> ImVec2 {
+    auto v = projection * inv_view_xform * fvec4{p, 1};                           // aka clip coord
+    return clip_coord_to_window_coord(v);
   };
 
   auto rev_project_3d = [&](const ImVec2& w) -> fvec3 {
@@ -193,6 +201,15 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
     auto u = fvec2{_u.x, -_u.y};
     auto p = fvec3{view_xform * fvec4{u / s, -1, 1}};
     return p;
+  };
+
+  auto project_clip_line = [&](const fvec3& p, const fvec3& q) -> std::optional<std::pair<ImVec2, ImVec2>> {
+    auto _p = projection * inv_view_xform * fvec4{p, 1};
+    auto _q = projection * inv_view_xform * fvec4{q, 1};
+    auto clip_p_q = hit::clipLineSegment(_p, _q);
+    if (!clip_p_q) { return {}; }
+    auto& [clip_p, clip_q] = *clip_p_q;
+    return std::make_pair(clip_coord_to_window_coord(clip_p), clip_coord_to_window_coord(clip_q));
   };
 
   bool _debug_lookat = true;
@@ -211,9 +228,20 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
     auto w2 = project_3d(p2);
 
     auto color = ig::GetColorU32({p1.x, p1.y, p1.z, .8});
-    draw->AddLine(w1, w2, color, 1.f);
-    draw->AddCircle(w2, 4.f, color);       // negative end
-    draw->AddCircleFilled(w1, 4.f, color); // positive end
+    if (ctx.clip_line) {
+      // TODO: fix exact vertical line (e.g. y axis) gets clipped
+      auto clip_p1_p2 = project_clip_line(p1, p2);
+      if (clip_p1_p2) {
+        auto& [_p1, _p2] = *clip_p1_p2;
+        draw->AddLine(_p1, _p2, color);
+        draw->AddCircle(_p1, 4.f, color);       // negative end
+        draw->AddCircleFilled(_p2, 4.f, color); // positive end
+      }
+    } else {
+      draw->AddLine(w1, w2, color, 1.f);
+      draw->AddCircle(w2, 4.f, color);       // negative end
+      draw->AddCircleFilled(w1, 4.f, color); // positive end
+    }
   }
 
   // Grid plane
@@ -243,8 +271,16 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
 
       // integer grid
       auto color = ig::GetColorU32({1, 1, 1, .5});
-      draw->AddLine(project_3d(p1), project_3d(p2), color);
-      draw->AddLine(project_3d(q1), project_3d(q2), color);
+
+      if (ctx.clip_line) {
+        auto clip_p1_p2 = project_clip_line(p1, p2);
+        auto clip_q1_q2 = project_clip_line(q1, q2);
+        if (clip_p1_p2) { draw->AddLine(clip_p1_p2->first, clip_p1_p2->second, color); }
+        if (clip_q1_q2) { draw->AddLine(clip_q1_q2->first, clip_q1_q2->second, color); }
+      } else {
+        draw->AddLine(project_3d(p1), project_3d(p2), color);
+        draw->AddLine(project_3d(q1), project_3d(q2), color);
+      }
 
       if (s == B) { continue; }
 
@@ -255,14 +291,22 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
         fvec3 g{0}; g[j] = f;
         fvec3 h{0}; h[k] = f;
         auto color = ig::GetColorU32({1, 1, 1, .2});
-        draw->AddLine(project_3d(p1 + g), project_3d(p2 + g), color);
-        draw->AddLine(project_3d(q1 + h), project_3d(q2 + h), color);
+        if (ctx.clip_line) {
+          auto clip_p1_p2 = project_clip_line(p1 + g, p2 + g);
+          auto clip_q1_q2 = project_clip_line(q1 + h, q2 + h);
+          if (clip_p1_p2) { draw->AddLine(clip_p1_p2->first, clip_p1_p2->second, color); }
+          if (clip_q1_q2) { draw->AddLine(clip_q1_q2->first, clip_q1_q2->second, color); }
+        } else {
+          draw->AddLine(project_3d(p1 + g), project_3d(p2 + g), color);
+          draw->AddLine(project_3d(q1 + h), project_3d(q2 + h), color);
+        }
       }
     }
   }
 
   // Plane at z = 1
-  {
+  bool _show_plane = true;
+  if (_show_plane) {
     fvec3 p[4] = { {1, 1, 1}, {-1, 1, 1}, {-1, -1, 1}, {1, -1, 1} };
     // ImGui applies anti-aliasing for CW face so we order points based on
     // whether plane faces to camera (i.e. position wrt plane's frame).
