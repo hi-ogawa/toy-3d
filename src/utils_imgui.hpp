@@ -73,30 +73,32 @@ inline bool InputTransform(
 // - [x] camera interaction
 //   - [x] rotation around vertical axis
 //   - [x] zoom
-//   - [@] move
-//   - [ ] stateful ui (use GetMouseDragDelta instead of MouseDelta)
+//   - [x] move
 // - [x] draw plane with imgui PathFillConvex
 // - [x] plane hit testing
+// - [ ] 3d primitive clipping
+//   - [ ] theory (projective space, convexity preservation, etc...)
+//   - [@] line
 // - [@] draw sphere with great circles of axis section
 // - [@] explore imgui primitive anti-aliasing method
 // - [ ] sphere surface hit testing with drawing normal and tangent surface
-// - [ ] 3d primitive clipping
 
 struct CameraViewContext {
   fvec2 viewport = {400, 400};
   fvec3 position = {2.5, 2.5, 2.5}; // support spherical coord mode
+  fvec3 lookat = {0, 0, 0};
   float yfov = 3.14 * 2 / 3;
   int axis_bound = 3;
   int grid_division = 2;
   int show_axis[3] = {1, 1, 1};
   int show_grid[3] = {0, 1, 0};
-  // cube mode, sphere mode
 };
 
 inline static CameraViewContext global_camera_view_context_;
 
 inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
   namespace ig = ImGui;
+
   //
   // Property input
   //
@@ -120,7 +122,7 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
     // z' = normalize(position)
     // x' = normalize(y [cross] z')    (TODO: take care z' ~ y)
     // y' = z' [cross] x'
-    auto z = glm::normalize(ctx.position);
+    auto z = glm::normalize(ctx.position - ctx.lookat);
     auto x = glm::normalize(glm::cross({0.f, 1.f, 0.f}, z));
     auto y = glm::cross(z, x);
     view_xform = {
@@ -152,26 +154,29 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
   if (active && ig::IsMouseDragging(0)) {
     auto v = io.MouseDelta / ctx.viewport;
 
-    // zoom
+    // zoom in/out "lookat"
     if (ig::GetIO().KeyAlt) {
       constexpr float m = 1.5, M = 10;
       auto dl = -v.x * (M - m);
-      auto l = glm::length(ctx.position);
-      ctx.position *= glm::clamp(l + dl, m, M) / l;
+      auto dp = ctx.position - ctx.lookat;
+      auto l = glm::length(dp);
+      ctx.position = ctx.lookat + dp * glm::clamp(l + dl, m, M) / l;
     }
-    // rotation
+    // rotation around "lookat" (TODO: take care when position.z < 0)
     if (ig::GetIO().KeyCtrl) {
       v.x *= 2 * 3.14;
       v.y *= 3.14;
       if (v.x != 0 || v.y != 0) {
         // NOTE: gl frame convention (z front, y up, x right)
         auto A = ExtrinsicEulerXYZ_to_SO3({-v.y, -v.x, 0});
-        ctx.position = A * ctx.position;
+        ctx.position = A * (ctx.position - ctx.lookat) + ctx.lookat;
       }
     }
-    // move (TODO)
+    // move "lookat"
     if (ig::GetIO().KeyShift) {
-
+      auto x = fmat3{view_xform} * fvec3{1, 0, 0};
+      auto y = fmat3{view_xform} * fvec3{0, 1, 0};
+      ctx.lookat += (x * (-v.x) + y * (v.y)) * 4.f;
     }
   }
 
@@ -189,6 +194,11 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
     auto p = fvec3{view_xform * fvec4{u / s, -1, 1}};
     return p;
   };
+
+  bool _debug_lookat = true;
+  if (_debug_lookat) {
+    draw->AddCircleFilled(project_3d(ctx.lookat), 3.f, ig::GetColorU32({1, 1, 1, 1}));
+  }
 
   // Axis
   for (auto i : range(3)) {
