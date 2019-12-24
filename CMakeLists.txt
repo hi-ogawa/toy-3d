@@ -8,3 +8,4 @@ set(CMAKE_CXX_FLAGS
 
 add_subdirectory(thirdparty)
 add_subdirectory(src)
+add_subdirectory(misc)
