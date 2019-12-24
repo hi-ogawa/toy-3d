@@ -85,12 +85,32 @@ inline bool InputTransform(
 // - [x] explore imgui primitive anti-aliasing method
 // - [x] draw sphere with great circles of axis section
 // - [x] sphere surface hit testing with drawing normal and tangent surface
-// - [@] fix camera pivot rotation interaction
+// - [x] camera pivot based interaction implementation
+
+fmat4 _translation_xform(fvec3 v) {
+  return fmat4{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {v, 1}};
+}
+
+fmat4 _lookat(fvec3 src, fvec3 dest, fvec3 up) {
+  // look at "dest" from "src" with new frame x' y' z' such that dot(up, y') > 0 and dot(up, x') = 0:
+  // z' = normalize(src - dest)
+  // x' = normalize(y [cross] z')    (TODO: take care z' ~ y)
+  // y' = z' [cross] x'
+  auto z = glm::normalize(src - dest);
+  auto x = glm::normalize(glm::cross(up, z));
+  auto y = glm::cross(z, x);
+  return {
+    fvec4{x, 0},
+    fvec4{y, 0},
+    fvec4{z, 0},
+    fvec4{src, 1},
+  };
+}
 
 struct CameraViewExperimentContext {
   fvec2 viewport = {400, 400};
-  fvec3 position = {2.5, 2.5, 2.5}; // support spherical coord mode
-  fvec3 lookat = {0, 0, 0};
+  fvec3 pivot = {0, 0, 0};
+  fmat4 view_xform = _lookat({2.0, 2.0, 2.5}, pivot, {0, 1, 0});
   float yfov = 3.14 * 2 / 3;
   float znear = 0.01;
   float zfar = 100;
@@ -99,6 +119,9 @@ struct CameraViewExperimentContext {
   int show_axis[3] = {1, 1, 1};
   int show_grid[3] = {0, 1, 0};
   bool clip_line = true;
+  bool show_pivot = true;
+  bool show_test_plane = true;
+  bool show_test_sphere = true;
 };
 
 inline static CameraViewExperimentContext global_camera_view_experiment_context_;
@@ -109,37 +132,38 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
   //
   // Property input
   //
-  ig::DragFloat("yfov", &ctx.yfov, 0.01f);
-  ig::InputInt("axis_bound", &ctx.axis_bound);
-  ig::InputInt("grid_division", &ctx.grid_division);
-  {
-    auto _1 = ImScoped::StyleVar(ImGuiStyleVar_FrameRounding, 8);
-    auto _2 = ImScoped::StyleVar(ImGuiStyleVar_GrabRounding,  8);
-    ig::SliderInt3("show_axis", ctx.show_axis, 0, 1, "");
-    ig::SliderInt3("show_grid", ctx.show_grid, 0, 1, "");
+  ig::Columns(2, __FILE__); {
+    {
+      ig::DragFloat("yfov", &ctx.yfov, 0.01f);
+      ig::InputInt("axis_bound", &ctx.axis_bound);
+      ig::InputInt("grid_division", &ctx.grid_division);
+      {
+        auto _1 = ImScoped::StyleVar(ImGuiStyleVar_FrameRounding, 8);
+        auto _2 = ImScoped::StyleVar(ImGuiStyleVar_GrabRounding,  8);
+        ig::SliderInt3("show_axis (x, y, z)", ctx.show_axis, 0, 1, "");
+        ig::SliderInt3("show_grid (yz, zx, xy)", ctx.show_grid, 0, 1, "");
+      }
+      ig::NextColumn();
+    }
+    {
+      ig::Checkbox("clip_line", &ctx.clip_line); ig::SameLine();
+      ig::Checkbox("show_pivot", &ctx.show_pivot);
+      ig::Checkbox("show_test_plane", &ctx.show_test_plane); ig::SameLine();
+      ig::Checkbox("show_test_sphere", &ctx.show_test_sphere);
+      if (ig::Button("Reset")) { ctx = { .viewport = ctx.viewport }; };
+      ig::Text("viewport size = { %d, %d }", (int)ctx.viewport.x, (int)ctx.viewport.y);
+      ImGui::NextColumn();
+    }
+    ImGui::Columns(1);
   }
+
 
   //
   // Transformation setup
   //
   fmat4 projection = glm::perspectiveRH_NO(ctx.yfov, ctx.viewport[0] / ctx.viewport[1], ctx.znear, ctx.zfar);
-  fmat4 view_xform;
-  {
-    // look at origin from "position" with new frame x' y' z' such that:
-    // z' = normalize(position)
-    // x' = normalize(y [cross] z')    (TODO: take care z' ~ y)
-    // y' = z' [cross] x'
-    auto z = glm::normalize(ctx.position - ctx.lookat);
-    auto x = glm::normalize(glm::cross({0.f, 1.f, 0.f}, z));
-    auto y = glm::cross(z, x);
-    view_xform = {
-      fvec4{x, 0},
-      fvec4{y, 0},
-      fvec4{z, 0},
-      fvec4{ctx.position, 1},
-    };
-  }
-  fmat4 inv_view_xform = inverseTR(view_xform);
+  fvec3 camera_position = fvec3{ctx.view_xform[3]};
+  fmat4 inv_view_xform = inverseTR(ctx.view_xform);
 
   //
   // Viewport setup
@@ -158,38 +182,47 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
   ig::RenderFrame(bb.Min, bb.Max, ig::GetColorU32(ImGuiCol_FrameBg));
 
   // camera transform ui
-  if (active && ig::IsMouseDragging(0)) {
-    auto v = io.MouseDelta / ctx.viewport;
+  if (active && ig::IsMouseDragging(0) && (io.MouseDelta.x != 0 || io.MouseDelta.y != 0) ) {
+    ImVec2 v = io.MouseDelta / ctx.viewport;
 
-    // zoom in/out "lookat"
+    // "transform" camera wrt instantaneous pivot frame which we define to as below:
+    float L = glm::length(camera_position - ctx.pivot);
+    fmat4 pivot_xform = ctx.view_xform * _translation_xform({0, 0, -L});
+
+    // zoom in/out to/from pivot
     if (ig::GetIO().KeyAlt) {
       constexpr float m = 1.5, M = 10;
-      auto dl = -v.x * (M - m);
-      auto dp = ctx.position - ctx.lookat;
-      auto l = glm::length(dp);
-      ctx.position = ctx.lookat + dp * glm::clamp(l + dl, m, M) / l;
+      float dl = -v.x * (M - m);
+      float new_L = glm::clamp(L + dl, m, M);
+      ctx.view_xform = pivot_xform * _translation_xform({0, 0, new_L});
     }
-    // rotation around "lookat" (TODO: take care when position.z < 0)
+    // rotation around pivot
     if (ig::GetIO().KeyCtrl) {
-      fvec2 u = { v.x * 2.f * 3.14, v.y * 3.14 };
-      if (u.x != 0 || u.y != 0) {
-        // rotate camera wrt. instantaneous "lookat" frame
-        // TODO:
-        // It cannot go over vertical axis (this is due to view_xform's construction).
-        // To support this, it view_xform should be directly tracked in context.
-        float l = glm::length(ctx.position - ctx.lookat);
-        fmat4 lookat_xform = view_xform * fmat4{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, -l, 1}};
-        fmat3 A = ExtrinsicEulerXYZ_to_SO3({-u.y, -u.x, 0});
-        fvec4 new_camera_wrt_lookat = fvec4{A * fvec3{0, 0, l}, 1};
-        fvec4 new_camera = lookat_xform * new_camera_wrt_lookat;
-        ctx.position = fvec3{new_camera};
-      }
+      ImVec2 u = v * ImVec2{2.f * 3.14f, 3.14f};
+
+      // NOTE:
+      // - "u.x" is for rotation of "usual" axial part of spherical coord.
+      // - "u.y" cannot be handled this way since it's domain is "theta \in [0, phi]".
+      //   but, by utilizing our `pivot_xform`, it can traverse great circle which passes north/south pole.
+      // - in tern, "u.x" is not handled like "u.y" since that would make camera pass through equator.
+      // - another complication of "u.x" is when camera's up vector can be flipped.
+
+      // up/down (u.y)
+      fmat3 A = ExtrinsicEulerXYZ_to_SO3({-u.y, 0, 0});
+      ctx.view_xform = pivot_xform * fmat4{A} * _translation_xform({0, 0, L});
+
+      // left/right (u.x)
+      fmat4 pivot_v3_xform = _lookat(ctx.pivot, {camera_position.x, ctx.pivot.y, camera_position.z}, {0, 1, 0});
+      fmat4 view_xform_wrt_pivot_v3 = inverseTR(pivot_v3_xform) * ctx.view_xform;
+      bool camera_flipped = view_xform_wrt_pivot_v3[1].y < 0;
+      fmat3 B = ExtrinsicEulerXYZ_to_SO3({0, camera_flipped ? u.x : -u.x, 0});
+      ctx.view_xform = pivot_v3_xform * fmat4{B} * view_xform_wrt_pivot_v3;
     }
-    // move "lookat"
+    // move with pivot
     if (ig::GetIO().KeyShift) {
-      auto x = fmat3{view_xform} * fvec3{1, 0, 0};
-      auto y = fmat3{view_xform} * fvec3{0, 1, 0};
-      ctx.lookat += (x * (-v.x) + y * (v.y)) * 4.f;
+      ImVec2 u = v * 3.f; // quite arbitrary scaling
+      ctx.view_xform = pivot_xform * _translation_xform({-u.x, u.y, L});
+      ctx.pivot      = fvec3{pivot_xform * fvec4{-u.x, u.y, 0, 1}};
     }
   }
 
@@ -208,7 +241,7 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
     auto s = fvec2{projection[0][0], projection[1][1]};
     auto _u = ((w - bb.Min) / (bb.Max - bb.Min)) * 2 - ImVec2{1, 1};
     auto u = fvec2{_u.x, -_u.y};
-    auto p = fvec3{view_xform * fvec4{u / s, -1, 1}};
+    auto p = fvec3{ctx.view_xform * fvec4{u / s, -1, 1}};
     return p;
   };
 
@@ -221,9 +254,8 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
     return std::make_pair(clip_coord_to_window_coord(clip_p), clip_coord_to_window_coord(clip_q));
   };
 
-  bool _debug_lookat = true;
-  if (_debug_lookat) {
-    draw->AddCircleFilled(project_3d(ctx.lookat), 3.f, ig::GetColorU32({1, 1, 1, 1}));
+  if (ctx.show_pivot) {
+    draw->AddCircleFilled(project_3d(ctx.pivot), 3.f, ig::GetColorU32({1, 1, 1, 1}));
   }
 
   // Axis
@@ -313,13 +345,12 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
   }
 
   // Plane at z = 1
-  bool _show_plane = true;
-  if (_show_plane) {
+  if (ctx.show_test_plane) {
     fvec3 p[4] = { {1, 1, 1}, {-1, 1, 1}, {-1, -1, 1}, {1, -1, 1} };
     // ImGui applies anti-aliasing for CW face so we order points based on
     // whether plane faces to camera (i.e. position wrt plane's frame).
     fmat4 model_xform = { {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 1, 0} };
-    bool ccw = (inverseTR(model_xform) * fvec4(ctx.position, 1)).z > 0;
+    bool ccw = (inverseTR(model_xform) * fvec4(camera_position, 1)).z > 0;
     draw->PathClear();
     for (auto i = (ccw ? 3 : 0); i != (ccw ? -1 : 4); i += (ccw ? -1 : 1)) {
       draw->PathLineTo(project_3d(p[i]));
@@ -342,28 +373,27 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
   }
 
   // Hit testing plane
-  if (active) {
-    auto& camera = ctx.position;
-    auto mouse_ray = rev_project_3d(ig::GetMousePos()) - camera;
-    auto t = hit::Line_Plane(camera, mouse_ray, {0, 0, 1}, {0, 0, 1});
+  if (active && ctx.show_test_plane) {
+    auto mouse_ray = rev_project_3d(ig::GetMousePos()) - camera_position;
+    auto t = hit::Line_Plane(camera_position, mouse_ray, {0, 0, 1}, {0, 0, 1});
     if (t && *t > 0) {
-      auto intersection =  camera + (*t) * mouse_ray;
+      auto intersection =  camera_position + (*t) * mouse_ray;
       bool rect_hit; {
         auto v = intersection - fvec3{0, 0, 1};
         rect_hit = glm::max(glm::abs(v.x), glm::abs(v.y)) < 1;
       }
       draw->AddLine(
-          project_3d(ctx.lookat), project_3d(intersection),
+          project_3d(ctx.pivot), project_3d(intersection),
           rect_hit ? ig::GetColorU32({0, 1, 1, .8}) : ig::GetColorU32({0, 1, 1, .3}),
           rect_hit ? 3.f : 1.f);
     }
   }
 
   // Draw sphere (outline)
-  {
+  if (ctx.show_test_sphere) {
     fvec3 c_model = {1, 0, 0}; // center
     float r = 1;             // radius
-    fvec3 c = c_model - ctx.position; // location w.r.t camera point
+    fvec3 c = c_model - camera_position; // location w.r.t camera point
 
     // Strategy 1.
     // - find tangental cone's base circle
@@ -430,14 +460,11 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
   if (active) {
     fvec3 center = {1, 0, 0};
     float radius = 1.f;
-
-    fvec3& camera = ctx.position;
-    fvec3 mouse_ray = rev_project_3d(ig::GetMousePos()) - camera;
-
-    auto t1_t2 = hit::Line_Sphere(camera, mouse_ray, center, radius);
+    fvec3 mouse_ray = rev_project_3d(ig::GetMousePos()) - camera_position;
+    auto t1_t2 = hit::Line_Sphere(camera_position, mouse_ray, center, radius);
     if (t1_t2) {
       auto [t, _] = *t1_t2;
-      fvec3 intersection = camera + t * mouse_ray;
+      fvec3 intersection = camera_position + t * mouse_ray;
       fvec3 normal = glm::normalize(intersection - center);
 
       // tangent space basis
