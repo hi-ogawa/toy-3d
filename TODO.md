@@ -360,6 +360,9 @@ TODO simpler_render_example
 
 # 2019/12/21
 
+- transform editor
+  - location, rotation, scale
+
 - 3d viewport interaction
   - [ ] mouse coordinate -> z projected point -> 3d ray
   - pivoted camera transform
@@ -374,3 +377,44 @@ TODO simpler_render_example
     - [ ] cube face hit testing
     - [ ] draw sphere at origin
     - [ ] sphere surface hit testing
+
+# 2019/12/22
+
+- [ ] glfw multi window
+  - imgui multi context
+
+- [ ] OpenGL pixel-by-pixel
+  - primitive fragment generation spec, anti-aliasing spec
+  - (NDC) [-1, 1]^2  -> [0, W]x[0, H] (window coord)
+  - fragment center at (x + 1/2, y + 1/2) with x, y \in Z[0, W - 1] x Z[0, H - 1]
+  - TODO:
+    - prepare small framebuffer (e.g. 4x4)
+    - write vertex directly in [-1, 1]^2
+    - visualize grid correspondence within [-1, 1]^2
+
+# 2019/12/23
+
+- OpenGL primitive clipping
+  - theory
+    - ClipVolume \subseteq R^4 (closed and convex)
+    - primitive is also closed convex, so intersection is well-defined
+
+- [ ] glfw wayland
+  - fix resize bug
+
+# 2019/12/24
+
+- [ ] ellipse therory
+  - conic section
+  - equivalence to "(a cos(t), b sin(t))"
+  - equivalence to focus-diretrix definition
+  - equivalence to "1 / 1 + e cos(t)"
+
+- size scaling experiment
+
+- [ ] scene editor viewport
+  - camera control
+  - transform gizmo
+  - node/mesh hit testing
+    - bvh theory
+    - bvh implementation
