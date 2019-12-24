@@ -3,6 +3,8 @@
 #include <imgui.h>
 #include <imgui_scoped.h>
 #include <glm/glm.hpp>
+#include <glm/geometric.hpp>
+#include <glm/ext/scalar_constants.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 
 #include "utils.hpp"
@@ -81,7 +83,7 @@ inline bool InputTransform(
 //   - [x] line
 //   - [-] triangle
 // - [x] explore imgui primitive anti-aliasing method
-// - [@] draw sphere with great circles of axis section
+// - [x] draw sphere with great circles of axis section
 // - [ ] sphere surface hit testing with drawing normal and tangent surface
 
 struct CameraViewContext {
@@ -234,8 +236,8 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
       if (clip_p1_p2) {
         auto& [_p1, _p2] = *clip_p1_p2;
         draw->AddLine(_p1, _p2, color);
-        draw->AddCircle(_p1, 4.f, color);       // negative end
-        draw->AddCircleFilled(_p2, 4.f, color); // positive end
+        draw->AddCircle(_p2, 4.f, color);       // negative end
+        draw->AddCircleFilled(_p1, 4.f, color); // positive end
       }
     } else {
       draw->AddLine(w1, w2, color, 1.f);
@@ -351,7 +353,76 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
     }
   }
 
-  // Sphere with great circle
+  // Draw sphere (outline)
+  {
+    fvec3 c_model = {1, 0, 0}; // center
+    float r = 1;             // radius
+    fvec3 c = c_model - ctx.position; // location w.r.t camera point
+
+    // Strategy 1.
+    // - find tangental cone's base circle
+    // - project circle's points and draw them
+    {
+      using std::cos, std::sin, std::asin;
+      float pi = glm::pi<float>();
+      float cone_half_angle = asin(r / glm::length(c));
+      float theta = (pi / 2.f) + cone_half_angle;
+      int ps_size = 48;
+      fvec3 ps[ps_size];
+
+      // cone base circle as "tilted" spherical coord
+      fmat3 frame; {
+        auto v1 = glm::normalize(c);
+        auto v2 = glm::normalize(glm::cross(v1, {1, 0, 0}));
+        auto v3 = glm::cross(v1, v2);
+        frame = {v2, v3, v1};
+      }
+      for (auto i : range(ps_size)) {
+        float phi = 2.f * pi * i / ps_size;
+        fvec3 v = { sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta) };
+        ps[i] = c_model + frame * r * v;
+      }
+
+      // project and draw outline (by construction, it's already CW)
+      draw->PathClear();
+      for (auto i : range(ps_size)) { draw->PathLineTo(project_3d(ps[i])); }
+      draw->PathFillConvex(ig::GetColorU32({1, 1, 1, .8}));
+    }
+
+    // Strategy 2. (TODO)
+    // - analytically find projected ellipse parameter (center, major/minor axis, etc...)
+    //   - some Dandelin sphere trick?
+    // - draw ellipse
+  }
+
+  // Draw sphere's great circles
+  {
+    float pi = glm::pi<float>();
+    fvec3 c_model = {1, 0, 0}; // center
+    float r = 1;               // radius
+
+    int num_segments = 48;
+
+    for (auto i : range(3)) {
+      auto j = (i + 1) % 3;
+      auto k = (i + 2) % 3;
+      fvec3 u{0}; u[j] = 1;
+      fvec3 v{0}; v[k] = 1;
+
+      draw->PathClear();
+      for (auto i : range(num_segments)) {
+        float t = 2 * pi * i / num_segments;
+        auto p = c_model + std::cos(t) * u + std::sin(t) * v;
+        draw->PathLineTo(project_3d(p));
+      }
+      fvec3 col{0}; col[i] = 1;
+      draw->PathStroke(ig::GetColorU32({col[0], col[1], col[2], .5}), true, 2.f);
+    }
+  }
+
+  // Hit test sphere surface and draw tangent plane quad
+  {
+  }
 }
 
 } // imgui

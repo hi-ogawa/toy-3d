@@ -263,9 +263,9 @@ inline std::optional<std::pair<fvec4, fvec4>> _clipLineSegment(
   auto& [t_in, t_out] = *t_in_out;
   if (1 < t_in) { return {}; }
   if (t_out < 0) {
-    fmt::print("p = ({}, {}, {}, {}), v = ({}, {}, {}, {})\n",
-        p.x, p.y, p.z, p.w, v.x, v.y, v.z, v.w);
-    fmt::print("(t_in, t_out) = ({}, {})\n", t_in, t_out);
+    // fmt::print("p = ({}, {}, {}, {}), v = ({}, {}, {}, {})\n",
+    //     p.x, p.y, p.z, p.w, v.x, v.y, v.z, v.w);
+    // fmt::print("(t_in, t_out) = ({}, {})\n", t_in, t_out);
     return {};
   }
 
