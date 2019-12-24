@@ -148,6 +148,8 @@ inline EnumerateHelper<T> enumerate(T container[], size_t size) {
 
 namespace hit {
 
+inline auto _isSmall(float f) { return glm::abs(f) < glm::epsilon<float>(); }
+
 inline auto Line_Plane(
     const fvec3& p, // line point
     const fvec3& v, // ray vector
@@ -158,7 +160,7 @@ inline auto Line_Plane(
   // <(p + t v) - q, n> = 0  <=>  t <v, n> = <q - p, n>
   auto a = glm::dot(v, n);
   auto b = glm::dot(q - p, n);
-  if (glm::abs(a) < glm::epsilon<float>()) { return {}; }
+  if (_isSmall(a)) { return {}; }
   return b / a;
 }
 
@@ -170,12 +172,29 @@ inline auto Line_Point(
 {
   // <(p + t v) - q, v> = 0  <=>  t <v, v> = <q - p, v>
   auto a = glm::dot(v, v);
-  TOY_ASSERT(glm::abs(a) > glm::epsilon<float>());
+  TOY_ASSERT(!_isSmall(a));
   auto b = glm::dot(q - p, v);
   return b / a;
 }
 
-inline auto _isSmall(float f) { return glm::abs(f) < glm::epsilon<float>(); }
+inline auto Line_Sphere(
+    const fvec3& p, // line point
+    const fvec3& v, // ray vector
+    const fvec3& c, // center
+    const float  r  // radius
+)-> std::optional<std::pair<float, float>> // t1 <= t2 where p + t v is on sphere (ball's surface)
+{
+  float t = hit::Line_Point(p, v, c);
+  fvec3 closest_point = p + t * v;
+  fvec3 off_center = closest_point - c;
+  float l = glm::length(off_center);
+  if (l >= r) { return {}; }
+
+  using std::asin, std::cos;
+  float in_angle = asin(l / r);
+  float dt = r * cos(in_angle) / glm::length(v);
+  return std::make_pair(t - dt, t + dt);
+}
 
 inline auto Line_Plane_4D(
     const fvec4& p, // line point

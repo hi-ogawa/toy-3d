@@ -84,7 +84,7 @@ inline bool InputTransform(
 //   - [-] triangle
 // - [x] explore imgui primitive anti-aliasing method
 // - [x] draw sphere with great circles of axis section
-// - [ ] sphere surface hit testing with drawing normal and tangent surface
+// - [x] sphere surface hit testing with drawing normal and tangent surface
 
 struct CameraViewContext {
   fvec2 viewport = {400, 400};
@@ -347,7 +347,7 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
         rect_hit = glm::max(glm::abs(v.x), glm::abs(v.y)) < 1;
       }
       draw->AddLine(
-          project_3d({0, 0, 0}), project_3d(intersection),
+          project_3d(ctx.lookat), project_3d(intersection),
           rect_hit ? ig::GetColorU32({0, 1, 1, .8}) : ig::GetColorU32({0, 1, 1, .3}),
           rect_hit ? 3.f : 1.f);
     }
@@ -421,7 +421,34 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
   }
 
   // Hit test sphere surface and draw tangent plane quad
-  {
+  if (active) {
+    fvec3 center = {1, 0, 0};
+    float radius = 1.f;
+
+    fvec3& camera = ctx.position;
+    fvec3 mouse_ray = rev_project_3d(ig::GetMousePos()) - camera;
+
+    auto t1_t2 = hit::Line_Sphere(camera, mouse_ray, center, radius);
+    if (t1_t2) {
+      auto [t, _] = *t1_t2;
+      fvec3 intersection = camera + t * mouse_ray;
+      fvec3 normal = glm::normalize(intersection - center);
+
+      // tangent space basis
+      fvec3 u = glm::normalize(glm::cross(normal, {0, -1, 0}));
+      fvec3 v = glm::normalize(glm::cross(normal, u));
+      glm::fmat2x3 F = {u, v};
+
+      float scale = 0.5;
+      fvec2 plane[4] = { {1, 1}, {1, -1}, {-1, -1}, {-1, 1} };
+
+      draw->PathClear();
+      for (auto i : range(4)) {
+        fvec3 p = intersection + F * scale * plane[i];
+        draw->PathLineTo(project_3d(p));
+      }
+      draw->PathFillConvex(ig::GetColorU32({0, 1, 1, .8}));
+    }
   }
 }
 
