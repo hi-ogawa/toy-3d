@@ -85,8 +85,9 @@ inline bool InputTransform(
 // - [x] explore imgui primitive anti-aliasing method
 // - [x] draw sphere with great circles of axis section
 // - [x] sphere surface hit testing with drawing normal and tangent surface
+// - [@] fix camera pivot rotation interaction
 
-struct CameraViewContext {
+struct CameraViewExperimentContext {
   fvec2 viewport = {400, 400};
   fvec3 position = {2.5, 2.5, 2.5}; // support spherical coord mode
   fvec3 lookat = {0, 0, 0};
@@ -100,9 +101,9 @@ struct CameraViewContext {
   bool clip_line = true;
 };
 
-inline static CameraViewContext global_camera_view_context_;
+inline static CameraViewExperimentContext global_camera_view_experiment_context_;
 
-inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
+inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camera_view_experiment_context_) {
   namespace ig = ImGui;
 
   //
@@ -170,12 +171,18 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
     }
     // rotation around "lookat" (TODO: take care when position.z < 0)
     if (ig::GetIO().KeyCtrl) {
-      v.x *= 2 * 3.14;
-      v.y *= 3.14;
-      if (v.x != 0 || v.y != 0) {
-        // NOTE: gl frame convention (z front, y up, x right)
-        auto A = ExtrinsicEulerXYZ_to_SO3({-v.y, -v.x, 0});
-        ctx.position = A * (ctx.position - ctx.lookat) + ctx.lookat;
+      fvec2 u = { v.x * 2.f * 3.14, v.y * 3.14 };
+      if (u.x != 0 || u.y != 0) {
+        // rotate camera wrt. instantaneous "lookat" frame
+        // TODO:
+        // It cannot go over vertical axis (this is due to view_xform's construction).
+        // To support this, it view_xform should be directly tracked in context.
+        float l = glm::length(ctx.position - ctx.lookat);
+        fmat4 lookat_xform = view_xform * fmat4{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, -l, 1}};
+        fmat3 A = ExtrinsicEulerXYZ_to_SO3({-u.y, -u.x, 0});
+        fvec4 new_camera_wrt_lookat = fvec4{A * fvec3{0, 0, l}, 1};
+        fvec4 new_camera = lookat_xform * new_camera_wrt_lookat;
+        ctx.position = fvec3{new_camera};
       }
     }
     // move "lookat"
@@ -231,7 +238,6 @@ inline void CameraView(CameraViewContext& ctx = global_camera_view_context_) {
 
     auto color = ig::GetColorU32({p1.x, p1.y, p1.z, .8});
     if (ctx.clip_line) {
-      // TODO: fix exact vertical line (e.g. y axis) gets clipped
       auto clip_p1_p2 = project_clip_line(p1, p2);
       if (clip_p1_p2) {
         auto& [_p1, _p2] = *clip_p1_p2;

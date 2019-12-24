@@ -46,15 +46,15 @@ struct TestPanel : Panel {
   constexpr static const char* type = "Test";
   static Panel* newPanelFunc() { return dynamic_cast<Panel*>(new TestPanel); }
   void processUI() override {
-    auto& ctx = utils::imgui::global_camera_view_context_;
+    auto& ctx = utils::imgui::global_camera_view_experiment_context_;
     ctx.viewport[0] = ImGui::GetWindowContentRegionWidth();
     ctx.viewport[1] = content_size_.y - ImGui::GetFrameHeightWithSpacing() * 5;
-    utils::imgui::CameraView();
+    utils::imgui::CameraViewExperiment();
   }
   void processMenu() override {
     if (auto _ = ImScoped::Menu("Edit")) {
       if (ImGui::MenuItem("Reset")) {
-        utils::imgui::global_camera_view_context_ = {};
+        utils::imgui::global_camera_view_experiment_context_ = {};
       }
     }
   }
