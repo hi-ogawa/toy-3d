@@ -248,12 +248,13 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
   };
 
   auto project_clip_line = [&](const fvec3& p, const fvec3& q) -> std::optional<std::pair<ImVec2, ImVec2>> {
-    auto _p = projection * inv_view_xform * fvec4{p, 1};
-    auto _q = projection * inv_view_xform * fvec4{q, 1};
-    auto clip_p_q = hit::clipLineSegment(_p, _q);
-    if (!clip_p_q) { return {}; }
-    auto& [clip_p, clip_q] = *clip_p_q;
-    return std::make_pair(clip_coord_to_window_coord(clip_p), clip_coord_to_window_coord(clip_q));
+    auto clip_pq = hit::clip4D_Line_ClipVolume({
+        projection * inv_view_xform * fvec4{p, 1},
+        projection * inv_view_xform * fvec4{q, 1}});
+    if (!clip_pq) { return {}; }
+    return std::make_pair(
+          clip_coord_to_window_coord((*clip_pq)[0]),
+          clip_coord_to_window_coord((*clip_pq)[1]));
   };
 
   auto project_clip_polygon = [&](const vector<fvec3>& ps) -> vector<ImVec2> {

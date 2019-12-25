@@ -83,35 +83,54 @@ TEST(UtilsTest, clip4D_ConvexPoly_ClipVolume) {
   }
 }
 
-TEST(UtilsTest, Line_ClipVolume) {
-  // y axis (for now ad-hocly handled (cf. `_isSmall(ts[0] - ts[1])` in Line_ClipVolume))
+TEST(UtilsTest, clip4D_Line_HalfSpace) {
+  using std::vector, glm::fvec4, std::array;
+  // Simple examples for code coverage
+  //         1
+  //       /            <~~~ Line
+  //     0
+  //<=|=>
+  //      <=|=>         <~~~ Plane and Normal
+  //           <=|=>
   {
-    glm::fvec4 p = {0,  2.3, 1.42,   1.44};
-    glm::fvec4 v = {0, -4.7, 5.7746, 5.7735};
-    auto t_in_out = utils::hit::Line_ClipVolume(p, v);
-    EXPECT_EQ((bool)t_in_out, true);
-
-    auto [t_in, t_out] = *t_in_out;
-    EXPECT_FLOAT_EQ(t_in, 0.082111992);
-    EXPECT_FLOAT_EQ(t_out, 18.180862);
-  }
-  {
-    glm::fvec4 p = {0, 0, 0, 1.44};
-    glm::fvec4 v = {0, 0, 0, 5.7735};
-    auto t_in  = utils::hit::Line_Plane_4D(p, v, {0, 0, 0, 0}, {1, 0, 0,-1});
-    auto t_out = utils::hit::Line_Plane_4D(p, v, {0, 0, 0, 0}, {1, 0, 0, 1});
-  }
-
-  // random example picked from debug log
-  if (0) {
-    glm::fvec4 p = {0.5495009, -0.52282155, -1.102122, -1.0819036};
-    glm::fvec4 v = {-1.0990018, 1.0456431, 5.164838, 5.163805};
-    auto t_in_out = utils::hit::Line_ClipVolume(p, v);
-    EXPECT_EQ((bool)t_in_out, true);
-
-    auto [t_in, t_out] = *t_in_out;
-    EXPECT_FLOAT_EQ(t_in, 0.26049092);
-    EXPECT_FLOAT_EQ(t_out, 19.575716);
+    array<fvec4, 2> ps = { fvec4{0, 0, 0, 0}, fvec4{1, 1, 0, 0} };
+    fvec4 q1 = {-0.5f, 0, 0, 0};
+    fvec4 q2 = { 0.5f, 0, 0, 0};
+    fvec4 q3 = { 1.5f, 0, 0, 0};
+    fvec4 n1 = { 1, 0, 0, 0};
+    fvec4 n2 = - n1;
+    {
+      auto r = utils::hit::clip4D_Line_HalfSpace(ps, q1, n1);
+      EXPECT_EQ((bool)r, true);
+      EXPECT_EQ((*r)[0], (fvec4{0, 0, 0, 0}));
+      EXPECT_EQ((*r)[1], (fvec4{1, 1, 0, 0}));
+    }
+    {
+      auto r = utils::hit::clip4D_Line_HalfSpace(ps, q1, n2);
+      EXPECT_EQ((bool)r, false);
+    }
+    {
+      auto r = utils::hit::clip4D_Line_HalfSpace(ps, q2, n1);
+      EXPECT_EQ((bool)r, true);
+      EXPECT_EQ((*r)[0], (fvec4{0.5f, 0.5f, 0, 0}));
+      EXPECT_EQ((*r)[1], (fvec4{   1,    1, 0, 0}));
+    }
+    {
+      auto r = utils::hit::clip4D_Line_HalfSpace(ps, q2, n2);
+      EXPECT_EQ((bool)r, true);
+      EXPECT_EQ((*r)[0], (fvec4{   0,    0, 0, 0}));
+      EXPECT_EQ((*r)[1], (fvec4{0.5f, 0.5f, 0, 0}));
+    }
+    {
+      auto r = utils::hit::clip4D_Line_HalfSpace(ps, q3, n1);
+      EXPECT_EQ((bool)r, false);
+    }
+    {
+      auto r = utils::hit::clip4D_Line_HalfSpace(ps, q3, n2);
+      EXPECT_EQ((bool)r, true);
+      EXPECT_EQ((*r)[0], (fvec4{0, 0, 0, 0}));
+      EXPECT_EQ((*r)[1], (fvec4{1, 1, 0, 0}));
+    }
   }
 }
 

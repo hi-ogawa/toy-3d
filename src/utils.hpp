@@ -334,111 +334,46 @@ inline vector<fvec4> clip4D_ConvexPoly_ClipVolume(const vector<fvec4>& poly) {
   return result;
 };
 
-inline auto Line_Plane_4D(
-    const fvec4& p, // line point
-    const fvec4& v, // ray vector
-    const fvec4& q, // plane point
-    const fvec4& n  // plane normal
-)-> std::optional<float> // t where p + t v is intersection unless <v, n> = 0
-{
-  // <(p + t v) - q, n> = 0  <=>  t <v, n> = <q - p, n>
-  auto a = glm::dot(v, n);
-  auto b = glm::dot(q - p, n);
-  if (glm::abs(a) < glm::epsilon<float>()) { return {}; }
-  return b / a;
-}
-
-// ClipVolume = { (x, w) \in R^3 x R | w >=0 and \forall i. |x_i| <= w }
-inline auto Line_ClipVolume(
-    const fvec4& p, // line point
-    const fvec4& v  // ray vector with v.w >= 0
-)-> std::optional<std::pair<float, float>>
-    // t_in <= t_out where p + t v \in Boundary(ClipVolume)
-    // t_out = FLT_MAX means ray doesn't get out (i.e. intersect at infinity).
-{
-  // fmt::print("p = ({}, {}, {}, {}), v = ({}, {}, {}, {})\n",
-  //     p.x, p.y, p.z, p.w, v.x, v.y, v.z, v.w);
-
-  float t_in_ = -FLT_MAX, t_out_ = FLT_MAX;
-
-  auto _subRoutine = [&p, &v, &t_in_, &t_out_](
-    const std::optional<float>& t1,
-    const std::optional<float>& t2
-  ) {
-    vector<float> ts; // float ts[2];
-    if (t1) {
-      auto q = p + (*t1) * v;
-      if (q.w >= 0) {
-        ts.push_back(*t1);
-      }
-    }
-    if (t2) {
-      auto q = p + (*t2) * v;
-      if (q.w >= 0) {
-        ts.push_back(*t2);
-      }
-    }
-    if (ts.size() == 2) {
-      // TODO:
-      // for now, ad-hocly handle t1 ~= t2 (which happens for exact y-axis (p.x = v.x = 0))
-      // probably, it needs to check if e.g. v.w > v.x (otherwise it doesn't go inside ClipVolume)
-      if (_isSmall(ts[0] - ts[1])) {
-        t_in_ = std::max(t_in_,  ts[0]);
-        return;
-      }
-
-      auto m = ts[0] < ts[1] ? ts[0] : ts[1];
-      auto M = ts[0] < ts[1] ? ts[1] : ts[0];
-      t_in_  = std::max(t_in_,  m);
-      t_out_ = std::min(t_out_, M);
-    } else if (ts.size() == 1) {
-      t_in_ = std::max(t_in_, ts[0]);
-    }
-  };
-
-  _subRoutine(
-      Line_Plane_4D(p, v, {0, 0, 0, 0}, {1, 0, 0,-1}),  // x = +w plane
-      Line_Plane_4D(p, v, {0, 0, 0, 0}, {1, 0, 0, 1})); // x = -w plane
-  _subRoutine(
-      Line_Plane_4D(p, v, {0, 0, 0, 0}, {0, 1, 0,-1}),  // y = +w plane
-      Line_Plane_4D(p, v, {0, 0, 0, 0}, {0, 1, 0, 1})); // y = -w plane
-  _subRoutine(
-      Line_Plane_4D(p, v, {0, 0, 0, 0}, {0, 0, 1,-1}),  // z = +w plane
-      Line_Plane_4D(p, v, {0, 0, 0, 0}, {0, 0, 1, 1})); // z = -w plane
-
-  if (t_in_ == FLT_MIN) { return {}; }
-  return std::make_pair(t_in_, t_out_);
+inline std::optional<std::array<fvec4, 2>> clip4D_Line_HalfSpace(
+    const std::array<fvec4, 2>& ps, // line segment
+    const fvec4& q,                 // half space as { u | dot(u - q, v) >= 0 }
+    const fvec4& n
+) {
+  // <(p + t v) - q, n> = 0  <=> t <v, n> = - <p - q, n>
+  fvec4 v = ps[1] - ps[0];
+  float a = glm::dot(v, n);
+  float b = glm::dot(ps[0] - q, n);
+  bool p0_in = b > 0;
+  float t = - b / a;
+  if (p0_in) {
+    // [case 1] p0_in && dot(v, n) >= 0
+    if (a >= 0) { return ps; }
+    // [case 2] p0_in && dot(v, n) < 0  (thus t > 0)
+    fvec4 new_p1 = ps[0] + std::min(t, 1.f) * v;
+    return std::array<fvec4, 2>{ ps[0], new_p1 };
+  }
+  // [case 3] !p0_in && dot(v, n) > 0 && t < 1 (thus t > 0)
+  if (a > 0 && t < 1) {
+    fvec4 new_p0 = ps[0] + t * v;
+    return std::array<fvec4, 2>{ new_p0, ps[1] };
+  }
+  return {};
 };
 
-// this takes only p.w <= q.w
-inline std::optional<std::pair<fvec4, fvec4>> _clipLineSegment(
-    const fvec4& p, const fvec4& q) {
-  auto v = q - p;
-  auto t_in_out = Line_ClipVolume(p, v);
-  if (!t_in_out) { return {}; }
+inline std::optional<std::array<fvec4, 2>> clip4D_Line_ClipVolume(const std::array<fvec4, 2>& ps) {
+  std::optional<std::array<fvec4, 2>> result = ps;
 
-  auto& [t_in, t_out] = *t_in_out;
-  if (1 < t_in) { return {}; }
-  if (t_out < 0) {
-    // fmt::print("p = ({}, {}, {}, {}), v = ({}, {}, {}, {})\n",
-    //     p.x, p.y, p.z, p.w, v.x, v.y, v.z, v.w);
-    // fmt::print("(t_in, t_out) = ({}, {})\n", t_in, t_out);
-    return {};
-  }
-
-  fvec4 p_in = p + std::max(0.f, t_in) * v;
-  fvec4 q_out = p + std::min(t_out, 1.f) * v;
-  return std::make_pair(p_in, q_out);
-}
-
-inline std::optional<std::pair<fvec4, fvec4>> clipLineSegment(
-    const fvec4& p, const fvec4& q) {
-  bool flip = p.w > q.w;
-  auto tmp = _clipLineSegment(flip ? q : p, flip ? p : q);
-  if (!tmp) { return {}; }
-  auto& [r, s] = *tmp;
-  return std::make_pair(flip ? s : r, flip ? r : s);
-}
+  // "ClipVolume" as intersection of 7 half spaces
+  fvec4 q  = {0, 0, 0, 0};
+  result = clip4D_Line_HalfSpace(*result, q, { 0, 0, 0, 1}); if (!result) return {};
+  result = clip4D_Line_HalfSpace(*result, q, { 1, 0, 0, 1}); if (!result) return {};
+  result = clip4D_Line_HalfSpace(*result, q, {-1, 0, 0, 1}); if (!result) return {};
+  result = clip4D_Line_HalfSpace(*result, q, { 0, 1, 0, 1}); if (!result) return {};
+  result = clip4D_Line_HalfSpace(*result, q, { 0,-1, 0, 1}); if (!result) return {};
+  result = clip4D_Line_HalfSpace(*result, q, { 0, 0, 1, 1}); if (!result) return {};
+  result = clip4D_Line_HalfSpace(*result, q, { 0, 0,-1, 1});
+  return result;
+};
 
 } // hit
 
