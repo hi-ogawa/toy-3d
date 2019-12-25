@@ -98,6 +98,15 @@ using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat3, glm::fmat4;
 using std::vector, std::string;
 }
 
+template <typename T>
+struct Reverse {
+  T& iterable_;
+  Reverse(T&  iterable) : iterable_{iterable} {}
+  Reverse(T&& iterable) : iterable_{iterable} {}
+  auto begin() { return std::rbegin(iterable_); };
+  auto end()   { return std::rend(iterable_);   };
+};
+
 struct RangeHelper {
   int start_, end_;
 
@@ -113,9 +122,23 @@ struct RangeHelper {
       return i_ != other.i_;
     }
   };
+  struct ReverseIterator {
+    int i_;
+
+    int operator*() { return i_; }
+    ReverseIterator& operator++() {
+      i_--;
+      return *this;
+    }
+    bool operator!=(const ReverseIterator& other) {
+      return i_ != other.i_;
+    }
+  };
 
   Iterator begin() { return Iterator{start_}; };
   Iterator end() { return Iterator{end_}; };
+  ReverseIterator rbegin() { return ReverseIterator{end_ - 1}; };
+  ReverseIterator rend() { return ReverseIterator{start_ - 1}; };
 };
 
 RangeHelper inline range(int start, int stop) {
@@ -216,7 +239,7 @@ inline auto Line_Sphere(
 
 inline vector<fvec4> clip4D_ConvexPoly_HalfSpace(
     const vector<fvec4>& vs, // dim(span{vi - v0 | i}) = 2 (thus vs.size() >= 3)
-    const fvec4& q, // half space as { u | dot(u - q, v) >= 0 }
+    const fvec4& q,          // half space as { u | dot(u - q, v) >= 0 }
     const fvec4& n
 ) {
   using glm::dot;
@@ -284,7 +307,7 @@ inline vector<fvec4> clip4D_ConvexPoly_HalfSpace(
   fvec4 u2 = p2 + t2 * w2; //
 
   vector<fvec4> result = { u2, u1 };
-  result.reserve((end - start) % N + 2);
+  result.reserve(mod(end - start, N) + 2);
 
   if (start < end) {
     result.insert(result.end(), vs.begin() + start, vs.begin() + end);

@@ -304,6 +304,26 @@ TEST(UtilsTest, GltfData) {
   EXPECT_EQ(mesh.indices.size(),11808);
 }
 
+TEST(UtilsTest, Reverse) {
+  using utils::Reverse, utils::range, std::vector, std::string;
+  {
+    std::string result;
+    std::string expected = "4,3,2,1,0,";
+    for (auto i : Reverse{range(5)}) {
+      result += fmt::format("{},", i);
+    }
+    EXPECT_EQ(result, expected);
+  }
+  {
+    vector<string> v = {"a", "b", "c", "d"};
+    std::string result;
+    std::string expected = "d,c,b,a,";
+    for (auto& s : Reverse{v}) {
+      result += fmt::format("{},", s);
+    }
+    EXPECT_EQ(result, expected);
+  }
+}
 
 TEST(UtilsTest, range) {
   std::string result = "\n";

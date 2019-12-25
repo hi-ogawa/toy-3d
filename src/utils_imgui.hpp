@@ -122,6 +122,7 @@ struct CameraViewExperimentContext {
   bool show_pivot = true;
   bool show_test_plane = true;
   bool show_test_sphere = true;
+  bool show_clip_poly = true;
 };
 
 inline static CameraViewExperimentContext global_camera_view_experiment_context_;
@@ -150,6 +151,7 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
       ig::Checkbox("show_pivot", &ctx.show_pivot);
       ig::Checkbox("show_test_plane", &ctx.show_test_plane); ig::SameLine();
       ig::Checkbox("show_test_sphere", &ctx.show_test_sphere);
+      ig::Checkbox("show_clip_poly", &ctx.show_clip_poly);
       if (ig::Button("Reset")) { ctx = { .viewport = ctx.viewport }; };
       ig::Text("viewport size = { %d, %d }", (int)ctx.viewport.x, (int)ctx.viewport.y);
       ImGui::NextColumn();
@@ -254,6 +256,19 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
     return std::make_pair(clip_coord_to_window_coord(clip_p), clip_coord_to_window_coord(clip_q));
   };
 
+  auto project_clip_polygon = [&](const vector<fvec3>& ps) -> vector<ImVec2> {
+    vector<fvec4> qs; qs.resize(ps.size());
+    for (auto i : range(ps.size())) {
+      qs[i] = projection * inv_view_xform * fvec4{ps[i], 1};
+    }
+    vector<fvec4> rs = hit::clip4D_ConvexPoly_ClipVolume(qs);
+    vector<ImVec2> result; result.resize(rs.size());
+    for (auto i : range(rs.size())) {
+      result[i] = clip_coord_to_window_coord(rs[i]);
+    }
+    return result;
+  };
+
   if (ctx.show_pivot) {
     draw->AddCircleFilled(project_3d(ctx.pivot), 3.f, ig::GetColorU32({1, 1, 1, 1}));
   }
@@ -349,11 +364,15 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
     fvec3 p[4] = { {1, 1, 1}, {-1, 1, 1}, {-1, -1, 1}, {1, -1, 1} };
     // ImGui applies anti-aliasing for CW face so we order points based on
     // whether plane faces to camera (i.e. position wrt plane's frame).
-    fmat4 model_xform = { {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 1, 0} };
+    fmat4 model_xform = { {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 1, 1} };
     bool ccw = (inverseTR(model_xform) * fvec4(camera_position, 1)).z > 0;
     draw->PathClear();
-    for (auto i = (ccw ? 3 : 0); i != (ccw ? -1 : 4); i += (ccw ? -1 : 1)) {
-      draw->PathLineTo(project_3d(p[i]));
+    if (ccw) {
+      for (auto i : Reverse{range(4)})
+        draw->PathLineTo(project_3d(p[i]));
+    } else {
+      for (auto i : range(4))
+        draw->PathLineTo(project_3d(p[i]));
     }
     draw->PathFillConvex(ig::GetColorU32({0, 0, 1, .8}));
 
@@ -363,6 +382,29 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
           project_3d({0, 0, 1}), 4.f,
           ig::GetColorU32(ccw ? ImVec4{1, 1, 0, 1} : ImVec4{1, 0, 1, 1}));
     }
+  }
+
+  // Plane at z = 1
+  if (ctx.show_clip_poly) {
+    vector<fvec3> ps = { {2, 0, 2}, {2, 0, -2}, {-2, 0, -2}, {-2, 0, 2} };
+    for (auto& p : ps) { p += fvec3{0, 1, 0}; }
+
+    fmat4 model_xform = { {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 1, 0, 1} };
+    fvec3 model_normal = {0, 1, 0};
+    bool ccw = glm::dot(model_normal, fvec3{inverseTR(model_xform) * fvec4(camera_position, 1)}) > 0;
+
+    vector<ImVec2> qs = project_clip_polygon(ps);
+    draw->PathClear();
+    if (ccw) {
+      for (auto& q : Reverse{qs}) draw->PathLineTo(q);
+    } else {
+      for (auto& q : qs) draw->PathLineTo(q);
+    }
+    draw->PathFillConvex(ig::GetColorU32({1, 1, 0, .8}));
+
+    draw->AddCircleFilled(
+        project_3d({0, 1, 0}), 5.f,
+        ig::GetColorU32(ccw ? ImVec4{1, 1, 0, 1} : ImVec4{1, 0, 1, 1}));
   }
 
   // Mouse position in world frame
