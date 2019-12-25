@@ -5,6 +5,84 @@
 
 using namespace toy;
 
+TEST(UtilsTest, clip4D_ConvexPoly_HalfSpace) {
+  using std::vector, glm::fvec4;
+  {
+    // Simple triangle but with different order of vertices (which probably makes good code coverage)
+    //  2
+    //  | \
+    //  0--1
+    vector<fvec4> poly = { {0, 0, 0, 0}, {1, 0, 0, 0}, {0, 1, 0, 0} };
+    fvec4 q = {0.5f, 0, 0, 0};
+    fvec4 n = {   1, 0, 0, 0};
+    {
+      // out -> in -> out
+      vector<fvec4> result = utils::hit::clip4D_ConvexPoly_HalfSpace(poly, q, n);
+      EXPECT_EQ(result.size(), 3);
+      EXPECT_EQ(result[0], (fvec4{0.5, 0.5, 0, 0}));
+      EXPECT_EQ(result[1], (fvec4{0.5,   0, 0, 0}));
+      EXPECT_EQ(result[2], (fvec4{1.0,   0, 0, 0}));
+    }
+    {
+      // in -> out -> out
+      vector<fvec4> result = utils::hit::clip4D_ConvexPoly_HalfSpace({poly[1], poly[2], poly[0]}, q, n);
+      EXPECT_EQ(result.size(), 3);
+      EXPECT_EQ(result[0], (fvec4{0.5, 0.5, 0, 0}));
+      EXPECT_EQ(result[1], (fvec4{0.5,   0, 0, 0}));
+      EXPECT_EQ(result[2], (fvec4{1.0,   0, 0, 0}));
+    }
+    {
+      // out -> out -> in
+      vector<fvec4> result = utils::hit::clip4D_ConvexPoly_HalfSpace({poly[2], poly[0], poly[1]}, q, n);
+      EXPECT_EQ(result.size(), 3);
+      EXPECT_EQ(result[0], (fvec4{0.5, 0.5, 0, 0}));
+      EXPECT_EQ(result[1], (fvec4{0.5,   0, 0, 0}));
+      EXPECT_EQ(result[2], (fvec4{1.0,   0, 0, 0}));
+    }
+  }
+}
+
+TEST(UtilsTest, clip4D_ConvexPoly_ClipVolume) {
+  using std::vector, glm::fvec4;
+  {
+    // clip 4x4 sqaure into 2x2
+    //  3--2
+    //  |  |
+    //  0--1
+    vector<fvec4> poly = { {-2, -2, 0, 1}, {2, -2, 0, 1}, {2, 2, 0, 1}, {-2, 2, 0, 1} };
+    {
+      vector<fvec4> result = utils::hit::clip4D_ConvexPoly_ClipVolume(poly);
+      EXPECT_EQ(result.size(), 4);
+      EXPECT_EQ(result[0], (fvec4{ 1, 1, 0, 1}));
+      EXPECT_EQ(result[1], (fvec4{-1, 1, 0, 1}));
+      EXPECT_EQ(result[2], (fvec4{-1,-1, 0, 1}));
+      EXPECT_EQ(result[3], (fvec4{ 1,-1, 0, 1}));
+    }
+  }
+  {
+    // 3-gon to 6-gon
+    //    2
+    //   / \
+    //  0--1
+    //        1__0
+    //       /    \
+    //  =>  2     5
+    //      |     |
+    //      3-----4
+    vector<fvec4> poly = { {-1.25, -0.5, 0, 1}, {1.25, -0.5, 0, 1}, {0, 2, 0, 1} };
+    {
+      vector<fvec4> result = utils::hit::clip4D_ConvexPoly_ClipVolume(poly);
+      EXPECT_EQ(result.size(), 6);
+      EXPECT_EQ(result[0], (fvec4{ 0.5,  1.0, 0.0, 1.0}));
+      EXPECT_EQ(result[1], (fvec4{-0.5,  1.0, 0.0, 1.0}));
+      EXPECT_EQ(result[2], (fvec4{-1.0,  0.0, 0.0, 1.0}));
+      EXPECT_EQ(result[3], (fvec4{-1.0, -0.5, 0.0, 1.0}));
+      EXPECT_EQ(result[4], (fvec4{ 1.0, -0.5, 0.0, 1.0}));
+      EXPECT_EQ(result[5], (fvec4{ 1.0,  0.0, 0.0, 1.0}));
+    }
+  }
+}
+
 TEST(UtilsTest, Line_ClipVolume) {
   // y axis (for now ad-hocly handled (cf. `_isSmall(ts[0] - ts[1])` in Line_ClipVolume))
   {

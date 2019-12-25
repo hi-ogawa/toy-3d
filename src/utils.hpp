@@ -54,23 +54,41 @@ inline std::string getGltfModelPath(const char* name) {
 }
 
 //
-// format glm::fmat4x4
+// fmt::format glm vector/matrix
 //
-inline std::ostream& operator<<(std::ostream& os, const glm::fmat4& A) {
-  auto _A = reinterpret_cast<const float*>(&A[0][0]);
-  os << "{ ";
-  for (auto i = 0; i < 16; i++) {
-    if (i == 15) {
-      os << _A[i];
-    } else if (i % 4 == 3) {
-      os << _A[i] << ",\n  ";
-    } else {
-      os << _A[i] << ", ";
+
+namespace fmt {
+
+template<glm::length_t L, typename T>
+struct formatter<glm::vec<L, T>> {
+  constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+  template <typename FormatContext>
+  auto format(const glm::vec<L, T>& v, FormatContext& ctx) {
+    std::string s;
+    for (auto i = 0; i < L; i++) {
+      if (i > 0) { s += ", "; }
+      s += fmt::to_string(v[i]);
     }
+    return format_to(ctx.out(), "{}", s);
   }
-  os << " }";
-  return os;
-}
+};
+
+template<glm::length_t C, glm::length_t R, typename T>
+struct formatter<glm::mat<C, R, T>> {
+  constexpr auto parse(format_parse_context& ctx) { return ctx.begin(); }
+
+  template <typename FormatContext>
+  auto format(const glm::mat<C, R, T>& A, FormatContext& ctx) {
+    std::string s;
+    for (auto i = 0; i < C; i++) {
+      s += fmt::to_string(A[i]);
+      s += "\n";
+    }
+    return format_to(ctx.out(), "{}", s);
+  }
+};
+
+} // fmt
 
 
 namespace toy { namespace utils {
@@ -195,6 +213,103 @@ inline auto Line_Sphere(
   float dt = r * cos(in_angle) / glm::length(v);
   return std::make_pair(t - dt, t + dt);
 }
+
+inline vector<fvec4> clip4D_ConvexPoly_HalfSpace(
+    const vector<fvec4>& vs, // dim(span{vi - v0 | i}) = 2 (thus vs.size() >= 3)
+    const fvec4& q, // half space as { u | dot(u - q, v) >= 0 }
+    const fvec4& n
+) {
+  using glm::dot;
+  auto mod = [](int i, int m) { return (i + m) % m; };
+
+  int N = vs.size();
+  float dots[vs.size()]; // dots[i] > 0  <=>  vs[i] \in (interior of) HalfSpace
+  int start = -1, end = -1;
+  //
+  // Compute start >= 0, end >=0 s.t.
+  //
+  //       outside <= | => inside
+  //                  |
+  //  ...>---v(i)-----|---v(i+1)-->...
+  //                  |
+  //  ...<---v(j+1)---|---v(j)----<...
+  //                  |
+  //   `start` = i+1
+  //   `end`   = j+1  (as modular arith. of `N`)
+  //
+  // (Then, later, find intersection u1, u2 and returns new polygon vs[i+1], ... vs[j], u1, u2)
+  //
+  {
+    dots[0] = dot(vs[0] - q, n);
+    bool in_first = dots[0] > 0;
+    bool in_tmp   = in_first;
+    int in_out_idx = -1; // by convexty, e.g. "in -> out -> in -> out" is impossible
+    int out_in_idx = -1;
+    for (auto i : range(1, N)) {
+      dots[i] = dot(vs[i] - q, n);
+      if ( in_tmp && !(dots[i] > 0)) { in_out_idx = i; in_tmp = false; }
+      if (!in_tmp &&   dots[i] > 0 ) { out_in_idx = i; in_tmp = true;  }
+    }
+    if (in_first) {
+      if (in_out_idx == -1) { return vs; } // all inside
+      start = out_in_idx == -1 ? 0 : out_in_idx;
+      end = in_out_idx;
+    } else {
+      if (out_in_idx == -1) { return {}; } // all outside
+      start = out_in_idx;
+      end = in_out_idx == -1 ? 0 : in_out_idx;
+    }
+  }
+  //
+  // Find intersection u1, u2 as in
+  //   outside <= | => inside
+  //       p1-----u1--->(w1)
+  //              |
+  //      (w2)<---u2-----p2
+  //
+  fvec4 p1 = vs[mod(start - 1, N)];   // outside
+  float d1 = dots[mod(start - 1, N)]; // <p1 - q, n> <= 0
+  fvec4 w1 = vs[start] - p1;
+
+  fvec4 p2 = vs[mod(end - 1, N)];     // inside
+  float d2 = dots[mod(end - 1, N)];   // <p2 - q, n> >  0
+  fvec4 w2 = vs[end] - p2;
+
+  // <(p + t w) - q, n> = 0  <=> t <w, n> = - <p - q, n>
+  float a1 = glm::dot(w1, n); // by construction, a1 > 0
+  float a2 = glm::dot(w2, n); //                  a2 < 0
+  float t1 = - d1 / a1;
+  float t2 = - d2 / a2;
+  fvec4 u1 = p1 + t1 * w1; // NOTE: at the same time, you could interpolate vertex attribute if any.
+  fvec4 u2 = p2 + t2 * w2; //
+
+  vector<fvec4> result = { u2, u1 };
+  result.reserve((end - start) % N + 2);
+
+  if (start < end) {
+    result.insert(result.end(), vs.begin() + start, vs.begin() + end);
+  } else {
+    result.insert(result.end(), vs.begin() + start, vs.end());
+    result.insert(result.end(), vs.begin(), vs.begin() + end);
+  }
+  return result;
+};
+
+inline vector<fvec4> clip4D_ConvexPoly_ClipVolume(const vector<fvec4>& poly) {
+  vector<fvec4> result = poly;
+  TOY_ASSERT(result.size() >= 3); // and also assert dim(poly) = 2
+
+  // "ClipVolume" as intersection of 7 half spaces
+  fvec4 q  = {0, 0, 0, 0};
+  result = clip4D_ConvexPoly_HalfSpace(result, q, { 0, 0, 0, 1}); if (result.size() < 3) return {};
+  result = clip4D_ConvexPoly_HalfSpace(result, q, { 1, 0, 0, 1}); if (result.size() < 3) return {};
+  result = clip4D_ConvexPoly_HalfSpace(result, q, {-1, 0, 0, 1}); if (result.size() < 3) return {};
+  result = clip4D_ConvexPoly_HalfSpace(result, q, { 0, 1, 0, 1}); if (result.size() < 3) return {};
+  result = clip4D_ConvexPoly_HalfSpace(result, q, { 0,-1, 0, 1}); if (result.size() < 3) return {};
+  result = clip4D_ConvexPoly_HalfSpace(result, q, { 0, 0, 1, 1}); if (result.size() < 3) return {};
+  result = clip4D_ConvexPoly_HalfSpace(result, q, { 0, 0,-1, 1});
+  return result;
+};
 
 inline auto Line_Plane_4D(
     const fvec4& p, // line point
