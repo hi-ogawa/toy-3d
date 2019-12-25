@@ -77,13 +77,11 @@ struct SceneRenderer {
 
 
 struct SceneManager {
-  unique_ptr<utils::gl::Framebuffer> framebuffer_; // TODO: should `RenderPanel` own framebuffer?
   unique_ptr<Scene> scene_;
   unique_ptr<SceneRenderer> renderer_;
   vector<unique_ptr<AssetRepository>> asset_repositories_;
 
   SceneManager() {
-    framebuffer_.reset(new utils::gl::Framebuffer);
     scene_.reset(new Scene);
     renderer_.reset(new SceneRenderer);
 
@@ -93,16 +91,16 @@ struct SceneManager {
 
   void loadGltf(const char* filename) {
     auto& new_assets = asset_repositories_.emplace_back(
-          new AssetRepository{gltf::load(filename)});
+        new AssetRepository{gltf::load(filename)});
     for (auto& node : new_assets->nodes_) {
       scene_->nodes_.push_back(node);
     }
     renderer_->updateRenderResouce(*scene_);
   }
 
-  void draw() {
+  void draw(const gl::Framebuffer& framebuffer) const {
     // bind non-default framebuffer
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer_->framebuffer_handle_);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer.framebuffer_handle_);
 
     // rendering configuration
     glEnable(GL_CULL_FACE);
@@ -115,8 +113,8 @@ struct SceneManager {
     glClearBufferfv(GL_DEPTH, 0, (GLfloat*)&depth);
 
     // draw
-    glViewport(0, 0, framebuffer_->size_.x, framebuffer_->size_.y);
-    scene_->camera_.aspect_ratio_ = (float)framebuffer_->size_.x / framebuffer_->size_.y;
+    glViewport(0, 0, framebuffer.size_.x, framebuffer.size_.y);
+    scene_->camera_.aspect_ratio_ = (float)framebuffer.size_.x / framebuffer.size_.y; // TODO: shouldn't change property here.
     renderer_->draw(*scene_);
   }
 };
@@ -128,17 +126,26 @@ struct SceneManager {
 
 struct RenderPanel : Panel {
   constexpr static const char* type = "Render";
-  gl::Framebuffer& fb_;
+  unique_ptr<utils::gl::Framebuffer> framebuffer_;
+  const SceneManager& mng_;
 
-  RenderPanel(gl::Framebuffer& fb) : fb_{fb} {
-    style_vars_ = { {ImGuiStyleVar_WindowPadding, ImVec2{0, 0} }};
+  RenderPanel(const SceneManager& mng) : mng_{mng} {
+    framebuffer_.reset(new utils::gl::Framebuffer);
+    style_vars_ = { {ImGuiStyleVar_WindowPadding, ImVec2{0, 0} } };
   }
 
   void processUI() override {
-    fb_.setSize({content_size_[0], content_size_[1]});
+    framebuffer_->setSize({content_size_[0], content_size_[1]});
+  }
+
+  // NOTE: this will be called after PanelManager handled insert/split/close etc...
+  //       so, ImGui won't use texture if panel is closed within current event loop,
+  //       which would cause "message = GL_INVALID_OPERATION in glBindTexture(non-gen name)".
+  void processPostUI() override {
+    mng_.draw(*framebuffer_);
     ImGui::Image(
-        reinterpret_cast<ImTextureID>(fb_.texture_handle_),
-        toImVec2(fb_.size_), /* uv0 */ {0, 1}, /* uv1 */ {1, 0});
+        reinterpret_cast<ImTextureID>(framebuffer_->texture_handle_),
+        ImVec2{framebuffer_->size_}, /* uv0 */ {0, 1}, /* uv1 */ {1, 0});
   }
 };
 
@@ -193,7 +200,8 @@ struct AssetsPanel : Panel {
       if (auto _ = ImScoped::TreeNodeEx(node->name_.data(), ImGuiTreeNodeFlags_DefaultOpen)) {
 
         if (auto _ = ImScoped::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-          if (ImGui::Button("Reset")) { node->transform_ = fmat4{1}; }
+          ImGui::SameLine();
+          if (ImGui::SmallButton("Reset")) { node->transform_ = fmat4{1}; };
           imgui::InputTransform(node->transform_);
         }
 
@@ -209,21 +217,26 @@ struct AssetsPanel : Panel {
     if (auto _ = ImScoped::TreeNodeEx("Camera", ImGuiTreeNodeFlags_DefaultOpen)) {
       auto& camera = mng_.scene_->camera_;
       if (auto _ = ImScoped::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (ImGui::Button("Reset")) { camera.transform_ = fmat4{1}; }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Reset")) { camera.transform_ = fmat4{1}; };
         imgui::InputTransform(camera.transform_);
       }
     }
   }
 
   void processUI() override {
-    if (auto _ = ImScoped::TreeNodeEx("Scene", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
-      auto __ = ImScoped::ID(__LINE__);
-      UI_Scene();
-    }
-
-    if (auto _ = ImScoped::TreeNodeEx("Import gltf", ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_DefaultOpen)) {
-      auto __ = ImScoped::ID(__LINE__);
-      UI_GltfImporter();
+    if (ImGui::BeginTabBar(__FILE__)){
+      if (ImGui::BeginTabItem("Scene")) {
+        auto __ = ImScoped::ID(__LINE__);
+        UI_Scene();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem("Importer")) {
+        auto __ = ImScoped::ID(__LINE__);
+        UI_GltfImporter();
+        ImGui::EndTabItem();
+      }
+      ImGui::EndTabBar();
     }
   }
 };
@@ -255,13 +268,13 @@ struct App {
     panel_manager_->registerPanelType<DemoPanel>();
 
     panel_manager_->registerPanelType<RenderPanel>([&]() {
-        return new RenderPanel{*scene_manager_->framebuffer_}; });
+        return new RenderPanel{*scene_manager_}; });
     panel_manager_->registerPanelType<AssetsPanel>([&]() {
         return new AssetsPanel{*scene_manager_}; });
 
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, AssetsPanel::type);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, RenderPanel::type, 0.5);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, DemoPanel::type, 0.5);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, DemoPanel::type, 0.6);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, RenderPanel::type, 0.5);
   }
 
   void UI_MainMenuBar() {
@@ -304,7 +317,6 @@ struct App {
       window_->newFrame();
       processUI();
       panel_manager_->processPostUI();
-      scene_manager_->draw();
       window_->render();
       done_ = done_ || window_->shouldClose();
     }

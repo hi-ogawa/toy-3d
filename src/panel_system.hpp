@@ -33,6 +33,7 @@ struct Panel {
 
   virtual ~Panel() {}
   virtual void processUI() {}
+  virtual void processPostUI() {}
   virtual void processMenu() {}
 
   void _pushStyleVars() {
@@ -315,8 +316,17 @@ struct PanelManager {
   }
 
   void processPostUI() {
-    for (auto& command : command_queue_) command();
+    for (auto& command : command_queue_) {
+      command();
+    }
     command_queue_ = {};
+
+    // Panel has chance to push content (cf. RenderPanel in scene_example)
+    for (auto& [_, panel] : panels_) {
+      if (auto _ = ImScoped::Window(panel->id_.data())) {
+        panel->processPostUI();
+      };
+    }
   }
 };
 
