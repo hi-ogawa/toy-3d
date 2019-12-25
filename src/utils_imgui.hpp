@@ -259,12 +259,12 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
 
   auto project_clip_polygon = [&](const vector<fvec3>& ps) -> vector<ImVec2> {
     vector<fvec4> qs; qs.resize(ps.size());
-    for (auto i : range(ps.size())) {
+    for (auto i : Range{ps.size()}) {
       qs[i] = projection * inv_view_xform * fvec4{ps[i], 1};
     }
     vector<fvec4> rs = hit::clip4D_ConvexPoly_ClipVolume(qs);
     vector<ImVec2> result; result.resize(rs.size());
-    for (auto i : range(rs.size())) {
+    for (auto i : Range{rs.size()}) {
       result[i] = clip_coord_to_window_coord(rs[i]);
     }
     return result;
@@ -275,7 +275,7 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
   }
 
   // Axis
-  for (auto i : range(3)) {
+  for (auto i : Range{3}) {
     if (!ctx.show_axis[i]) { continue; }
 
     auto p1 = glm::fmat3{1}[i] * (float)ctx.axis_bound;
@@ -301,13 +301,13 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
   }
 
   // Grid plane
-  for (auto i : range(3)) {
+  for (auto i : Range{3}) {
     if (!ctx.show_grid[i]) { continue; }
     auto j = (i + 1) % 3;                        // e.g. i = 0, j = 1, k = 2
     auto k = (i + 2) % 3;
     auto B = ctx.axis_bound;
     fvec3 v{0}; v[k] = B;                        // e.g. {0, 0, B}
-    for (auto s : range(-B, B + 1)) {
+    for (auto s : Range{-B, B + 1}) {
       fvec3 u{0}; u[j] = s;                      // e.g. {0, s, 0}
       fvec3 p1 = u + v;                          // e.g. {0, s, B}
       fvec3 p2 = u - v;                          // e.g. {0, s,-B}
@@ -342,7 +342,7 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
 
       // fractional grid
       auto D = ctx.grid_division;
-      for (auto l : range(1, D)) {
+      for (auto l : Range{1, D}) {
         auto f = (float)l / D;
         fvec3 g{0}; g[j] = f;
         fvec3 h{0}; h[k] = f;
@@ -369,10 +369,10 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
     bool ccw = (inverseTR(model_xform) * fvec4(camera_position, 1)).z > 0;
     draw->PathClear();
     if (ccw) {
-      for (auto i : Reverse{range(4)})
+      for (auto i : Reverse{Range{4}})
         draw->PathLineTo(project_3d(p[i]));
     } else {
-      for (auto i : range(4))
+      for (auto i : Range{4})
         draw->PathLineTo(project_3d(p[i]));
     }
     draw->PathFillConvex(ig::GetColorU32({0, 0, 1, .8}));
@@ -456,7 +456,7 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
         auto v3 = glm::cross(v1, v2);
         frame = {v2, v3, v1};
       }
-      for (auto i : range(ps_size)) {
+      for (auto i : Range{ps_size}) {
         float phi = 2.f * pi * i / ps_size;
         fvec3 v = { sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta) };
         ps[i] = c_model + frame * r * v;
@@ -464,7 +464,7 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
 
       // project and draw outline (by construction, it's already CW)
       draw->PathClear();
-      for (auto i : range(ps_size)) { draw->PathLineTo(project_3d(ps[i])); }
+      for (auto i : Range{ps_size}) { draw->PathLineTo(project_3d(ps[i])); }
       draw->PathFillConvex(ig::GetColorU32({1, 1, 1, .8}));
     }
 
@@ -482,14 +482,14 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
 
     int num_segments = 48;
 
-    for (auto i : range(3)) {
+    for (auto i : Range{3}) {
       auto j = (i + 1) % 3;
       auto k = (i + 2) % 3;
       fvec3 u{0}; u[j] = 1;
       fvec3 v{0}; v[k] = 1;
 
       draw->PathClear();
-      for (auto i : range(num_segments)) {
+      for (auto i : Range{num_segments}) {
         float t = 2 * pi * i / num_segments;
         auto p = c_model + std::cos(t) * u + std::sin(t) * v;
         draw->PathLineTo(project_3d(p));
@@ -519,7 +519,7 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
       fvec2 plane[4] = { {1, 1}, {1, -1}, {-1, -1}, {-1, 1} };
 
       draw->PathClear();
-      for (auto i : range(4)) {
+      for (auto i : Range{4}) {
         fvec3 p = intersection + F * scale * plane[i];
         draw->PathLineTo(project_3d(p));
       }

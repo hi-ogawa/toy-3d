@@ -107,8 +107,12 @@ struct Reverse {
   auto end()   { return std::rend(iterable_);   };
 };
 
-struct RangeHelper {
+struct Range {
   int start_, end_;
+  Range(int start, int end) : start_{start}, end_{std::max(start, end)} {}
+  Range(int end) : Range(0, end) {}
+  Range(size_t start, size_t end) : start_{static_cast<int>(start)}, end_{static_cast<int>(std::max(start, end))} {}
+  Range(size_t end) : start_{0}, end_{static_cast<int>(end)} {}
 
   struct Iterator {
     int i_;
@@ -141,19 +145,15 @@ struct RangeHelper {
   ReverseIterator rend() { return ReverseIterator{start_ - 1}; };
 };
 
-RangeHelper inline range(int start, int stop) {
-  return RangeHelper{start, std::max(start, stop)};
-}
-
-RangeHelper inline range(int stop) {
-  return range(0, stop);
-}
-
-
 template<typename T>
-struct EnumerateHelper {
+struct Enumerate {
   size_t start_, end_;
   T* data;
+
+  Enumerate(vector<T>& container)
+    : start_{0}, end_{container.size()}, data{container.data()} {}
+  Enumerate(T* data, size_t size)
+    : start_{0}, end_{size}, data{data} {}
 
   struct Iterator {
     size_t i_;
@@ -175,15 +175,6 @@ struct EnumerateHelper {
   Iterator end() { return Iterator{end_, data}; };
 };
 
-template<typename T>
-inline EnumerateHelper<T> enumerate(vector<T>& container) {
-  return EnumerateHelper<T>{0, container.size(), container.data()};
-}
-
-template<typename T>
-inline EnumerateHelper<T> enumerate(T container[], size_t size) {
-  return EnumerateHelper<T>{0, size, container};
-}
 
 // Primitive closest point (cf. closed convex projection theorem)
 
@@ -268,7 +259,7 @@ inline vector<fvec4> clip4D_ConvexPoly_HalfSpace(
     bool in_tmp   = in_first;
     int in_out_idx = -1; // by convexty, e.g. "in -> out -> in -> out" is impossible
     int out_in_idx = -1;
-    for (auto i : range(1, N)) {
+    for (auto i : Range{1, N}) {
       dots[i] = dot(vs[i] - q, n);
       if ( in_tmp && !(dots[i] > 0)) { in_out_idx = i; in_tmp = false; }
       if (!in_tmp &&   dots[i] > 0 ) { out_in_idx = i; in_tmp = true;  }
@@ -535,172 +526,6 @@ inline vector<T> Quads_to_Triangles(const vector<T>& quad_indices) {
     result[6 * i + 5] = B;
   }
   return result;
-};
-
-// TODO: superceded by scene::gltf in scene.hpp
-// cf. https://github.com/KhronosGroup/glTF/blob/master/specification/2.0/README.md
-struct GltfData {
-
-  struct Texture {
-    string name;
-    string filename;
-  };
-
-  struct Material {
-    string name;
-    fvec4 base_color_factor = {1, 1, 1, 1};
-    std::shared_ptr<Texture> base_color_tex;
-  };
-
-  struct Mesh {
-    struct VertexAttrs {
-      fvec3 position;
-      fvec3 normal;
-      fvec4 tangent;
-      fvec2 texcoord;
-      fvec4 color = {1, 1, 1, 1};
-    };
-
-    string name;
-    vector<uint16_t> indices;
-    vector<VertexAttrs> vertices;
-    std::shared_ptr<Material> material;
-  };
-
-  string filename;
-
-  vector<Texture> textures;
-  vector<Material> materials;
-  vector<Mesh> meshes;
-
-  // Cf. cgltf_accessor_read_index, cgltf_calc_size
-  static void* readAccessor(const cgltf_accessor* accessor, size_t index) {
-    cgltf_size offset = accessor->offset + accessor->buffer_view->offset;
-    uint8_t* element = (uint8_t*)accessor->buffer_view->buffer->data;
-    return (void*)(element + offset + accessor->stride * index);
-  }
-
-  static GltfData load(const char* filename) {
-    GltfData result;
-    result.filename = filename;
-    std::string dirname = {filename , 0, std::string{filename}.rfind('/')};
-    std::map<cgltf_texture*, std::shared_ptr<Texture>> tmp_map1;
-    std::map<cgltf_material*, std::shared_ptr<Material>> tmp_map2;
-
-    // Load gltf file
-    cgltf_options params = {};
-    cgltf_data* data;
-    if (cgltf_parse_file(&params, filename, &data) != cgltf_result_success) {
-      throw std::runtime_error{fmt::format("cgltf_parse_file failed: {}", filename)};
-    }
-    std::unique_ptr<cgltf_data, decltype(&cgltf_free)> final_action{data, &cgltf_free};
-
-    if (cgltf_load_buffers(&params, data, filename) != cgltf_result_success) {
-      throw std::runtime_error{fmt::format("cgltf_load_buffers failed: {}", filename)};
-    }
-
-    //
-    // Convert data
-    //
-    // - Strategy
-    //   - read Texture -> Material -> Mesh in this order
-    //   - each cgltf_primitive becomse Mesh
-    //   - everything triangle
-    // - Assertions
-    //   - indices type is uint16_t (this is the case all but SciFiHelmet (https://github.com/KhronosGroup/glTF-Sample-Models/blob/master/2.0/SciFiHelmet))
-    //   - vertex attribute is already float
-    //
-
-    // Load textures
-    for (auto [i, gtex] : enumerate(data->textures, data->textures_count)) {
-      TOY_ASSERT(gtex->image->uri);
-      result.textures.push_back({
-          .name = gtex->image->uri,
-          .filename = dirname + "/" + gtex->image->uri });
-    }
-
-    // Load materials
-    for (auto [i, gmat] : enumerate(data->materials, data->materials_count)) {
-      auto& mat = result.materials.emplace_back();
-      mat.name = gmat->name;
-      if (gmat->has_pbr_metallic_roughness) {
-        auto& pbr = gmat->pbr_metallic_roughness;
-        mat.base_color_factor = *(fvec4*)(pbr.base_color_factor);
-        mat.base_color_tex = tmp_map1[pbr.base_color_texture.texture];
-      }
-    }
-
-    // Load meshes
-    for (auto [i, gmesh] : enumerate(data->meshes, data->meshes_count)) {
-      for (auto [j, gprim] : enumerate(gmesh->primitives, gmesh->primitives_count)) {
-        auto& mesh = result.meshes.emplace_back();
-        mesh.name = fmt::format("{} ({})", gmesh->name, j + 1);
-        mesh.material = tmp_map2[gprim->material];
-
-        // Read indices
-        {
-          auto accessor = gprim->indices;
-          TOY_ASSERT(accessor->component_type == cgltf_component_type_r_16u);
-          mesh.indices.resize(accessor->count);
-          for (auto k : range(accessor->count)) {
-            mesh.indices[k] = *(uint16_t*)readAccessor(accessor, k);
-          }
-        }
-
-        // Read vertex attributes
-        // TODO: read in non-interleaved mode and check which attributes are found
-        int vertex_count = -1;
-        for (auto [k, gattr] : enumerate(gprim->attributes, gprim->attributes_count)) {
-          TOY_ASSERT(gattr->index == 0);
-
-          auto accessor = gattr->data;
-          if (vertex_count == -1) {
-            vertex_count = accessor->count;
-            mesh.vertices.resize(vertex_count);
-          }
-          TOY_ASSERT(vertex_count == accessor->count);
-          TOY_ASSERT(accessor->component_type == cgltf_component_type_r_32f);
-
-          switch (gattr->type) {
-            case cgltf_attribute_type_position: {
-              for (auto k : range(accessor->count)) {
-                mesh.vertices[k].position = *(fvec3*)readAccessor(accessor, k);
-              }
-              break;
-            }
-            case cgltf_attribute_type_normal: {
-              for (auto k : range(accessor->count)) {
-                mesh.vertices[k].normal = *(fvec3*)readAccessor(accessor, k);
-              }
-              break;
-            }
-            case cgltf_attribute_type_tangent: {
-              for (auto k : range(accessor->count)) {
-                mesh.vertices[k].tangent = *(fvec4*)readAccessor(accessor, k);
-              }
-              break;
-            }
-            case cgltf_attribute_type_texcoord: {
-              for (auto k : range(accessor->count)) {
-                mesh.vertices[k].texcoord = *(fvec2*)readAccessor(accessor, k);
-              }
-              break;
-            }
-            case cgltf_attribute_type_color: {
-              for (auto k : range(accessor->count)) {
-                mesh.vertices[k].color = *(fvec4*)readAccessor(accessor, k);
-              }
-              break;
-            }
-            default:;
-          }
-        }
-      }
-    }
-
-
-    return result;
-  }
 };
 
 inline auto createCube() {
@@ -1191,7 +1016,7 @@ struct Cli {
   std::string help() {
     auto join = [](const std::vector<std::string>& v) {
       std::string result;
-      for (auto i : range(v.size())) {
+      for (auto i : Range{v.size()}) {
         result += " " + v[i];
       }
       return result;

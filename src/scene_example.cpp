@@ -198,7 +198,7 @@ struct AssetsPanel : Panel {
         }
 
         if (auto _ = ImScoped::TreeNodeEx("(Transform Matrix)")) {
-          for (auto i : utils::range(4)) {
+          for (auto i : utils::Range{4}) {
             auto _ = ImScoped::ID(i);
             ImGui::DragFloat4(fmt::format("transform[{}]", i).data(), (float*)&node->transform_[i], .05);
           }

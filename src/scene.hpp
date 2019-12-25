@@ -166,6 +166,8 @@ namespace gltf {
   //   - single primitive per mesh
   //
   inline AssetRepository load(const string& filename) {
+    using utils::Range, utils::Enumerate;
+
     AssetRepository result;
     result.name_ = getBasename(filename);
     result.filename_ = filename;
@@ -185,7 +187,7 @@ namespace gltf {
     TOY_ASSERT(cgltf_load_buffers(&gparams, gdata, filename.data()) == cgltf_result_success);
 
     // 2. load texture (only image name)
-    for (auto [_, gtex] : utils::enumerate(gdata->textures, gdata->textures_count)) {
+    for (auto [_, gtex] : Enumerate{gdata->textures, gdata->textures_count}) {
       TOY_ASSERT(gtex->image->uri);
       auto& texture = result.textures_.emplace_back(new Texture);
       ref_map_texture[gtex] = texture;
@@ -194,7 +196,7 @@ namespace gltf {
     }
 
     // 3. load material
-    for (auto [_, gmat] : utils::enumerate(gdata->materials, gdata->materials_count)) {
+    for (auto [_, gmat] : Enumerate{gdata->materials, gdata->materials_count}) {
       auto& mat = result.materials_.emplace_back(new Material);
       ref_map_material[gmat] = mat;
       mat->name_ = gmat->name;
@@ -209,9 +211,9 @@ namespace gltf {
     }
 
     // 4. load mesh
-    for (auto [i, gmesh] : utils::enumerate(gdata->meshes, gdata->meshes_count)) {
+    for (auto [i, gmesh] : Enumerate{gdata->meshes, gdata->meshes_count}) {
       TOY_ASSERT(gmesh->primitives_count == 1);
-      for (auto [_, gprim] : utils::enumerate(gmesh->primitives, gmesh->primitives_count)) {
+      for (auto [_, gprim] : Enumerate{gmesh->primitives, gmesh->primitives_count}) {
         auto& node = result.nodes_.emplace_back(new Node);
         ref_map_mesh_node[gmesh] = node;
 
@@ -232,13 +234,13 @@ namespace gltf {
           auto accessor = gprim->indices;
           TOY_ASSERT(accessor->component_type == cgltf_component_type_r_16u);
           prim.indices.resize(accessor->count);
-          for (auto k : utils::range(accessor->count)) {
+          for (auto k : Range{accessor->count}) {
             prim.indices[k] = *(uint16_t*)readAccessor(accessor, k);
           }
         }
 
         // 4.2. load vertex attributes
-        for (auto [_, gattr] : utils::enumerate(gprim->attributes, gprim->attributes_count)) {
+        for (auto [_, gattr] : Enumerate{gprim->attributes, gprim->attributes_count}) {
           // reject TEXCOORD_1 etc..
           TOY_ASSERT(gattr->index == 0);
 
@@ -249,7 +251,7 @@ namespace gltf {
           #define CASE_MACRO(TYPE)                                        \
             case cgltf_attribute_type_##TYPE: {                           \
               prim.TYPE##s.resize(accessor->count);                       \
-              for (auto k : utils::range(accessor->count)) {              \
+              for (auto k : Range{accessor->count}) {                     \
                 using cast_type = decltype(prim.TYPE##s)::value_type;     \
                 prim.TYPE##s[k] = *(cast_type*)readAccessor(accessor, k); \
               }                                                           \
@@ -282,7 +284,7 @@ namespace gltf {
         mesh->indices_ = prim.indices;
         mesh->vertices_.resize(num);
         prim.positions.empty();
-        for (auto k : utils::range(num)) {
+        for (auto k : utils::Range{num}) {
           #define MACRO(NAME) prim.NAME.empty() ? decltype(prim.NAME)::value_type{} : prim.NAME[k]
           mesh->vertices_[k] = {
             MACRO(positions),
@@ -297,7 +299,7 @@ namespace gltf {
     }
 
     // 5. load node
-    for (auto [i, gnode] : utils::enumerate(gdata->nodes, gdata->nodes_count)) {
+    for (auto [i, gnode] : Enumerate{gdata->nodes, gdata->nodes_count}) {
       if (!gnode->mesh) { continue; }
 
       auto& node = ref_map_mesh_node[gnode->mesh];

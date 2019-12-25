@@ -69,23 +69,6 @@ struct SimpleRenderer {
         .indices_ = interleave<uint16_t>(indices),
       };
     };
-
-    static Mesh loadGltf(const char* filename) {
-      auto data = utils::GltfData::load(filename);
-      TOY_ASSERT(data.meshes.size() == 1);
-      auto& mesh = data.meshes[0];
-      vector<VertexData> result;
-      result.resize(mesh.vertices.size());
-      for (auto [i, v] : utils::enumerate(mesh.vertices)) {
-        result[i] = { .position = v->position,
-                      .color = v->color,
-                      .uv = v->texcoord };
-      }
-      return {
-        .vertices_ = std::move(result),
-        .indices_ = std::move(mesh.indices),
-      };
-    };
   };
 
   struct Texture {
@@ -173,38 +156,6 @@ void main() {
     models_.emplace_back(new Model{Mesh::create(utils::createUVCube)});
     models_.emplace_back(new Model{Mesh::create(utils::create4Hedron)});
     models_.emplace_back(new Model{Mesh::create(utils::createUVPlane)});
-
-    models_.emplace_back(new Model{
-        Mesh::loadGltf(GLTF_MODEL_PATH("BoxVertexColors"))});
-    // NOTE:
-    // if later vector::emplace_back causes "vector reallocation", this reference can become invalid.
-    // that's why we reserve a bit here.
-    models_.reserve(10);
-    auto& box = models_.emplace_back(new Model{
-        Mesh::loadGltf(GLTF_MODEL_PATH("BoxTextured"))});
-    auto& helmet = models_.emplace_back(new Model{
-        Mesh::loadGltf(GLTF_MODEL_PATH("DamagedHelmet"))});
-    auto& monkey = models_.emplace_back(new Model{
-        Mesh::loadGltf(GLTF_MODEL_PATH("Suzanne"))});
-
-    {
-      auto gltf = utils::GltfData::load(GLTF_MODEL_PATH("BoxTextured"));
-      shared_ptr<Texture> texture{new Texture{gltf.textures[0].filename}};
-      box->material_.base_color_tex_.reset(new Texture{gltf.textures[0].filename});
-      box->material_.use_base_color_tex_ = true;
-    }
-    {
-      auto gltf = utils::GltfData::load(GLTF_MODEL_PATH("DamagedHelmet"));
-      shared_ptr<Texture> texture{new Texture{gltf.textures[0].filename}};
-      helmet->material_.base_color_tex_ = texture;
-      helmet->material_.use_base_color_tex_ = true;
-    }
-    {
-      auto gltf = utils::GltfData::load(GLTF_MODEL_PATH("Suzanne"));
-      shared_ptr<Texture> texture{new Texture{gltf.textures[0].filename}};
-      monkey->material_.base_color_tex_ = texture;
-      monkey->material_.use_base_color_tex_ = true;
-    }
 
     {
       shared_ptr<Texture> texture{

@@ -198,7 +198,7 @@ TEST(UtilsTest, composeTransform) {
     glm::fvec3 s = {1, 1, 1};
     glm::fvec3 t = {0, 0, 0};
 
-    for (auto i : utils::range(90)) {
+    for (auto i : utils::Range{90}) {
       glm::fvec3 degs_in = {0, i, 0};
       glm::fmat4 xform = utils::composeTransform(s, glm::radians(degs_in), t);
       auto [_s, _r, _t] = utils::decomposeTransform(xform);
@@ -309,26 +309,12 @@ TEST(UtilsTest, decomposeTransform) {
   }
 }
 
-
-TEST(UtilsTest, GltfData) {
-  auto data = utils::GltfData::load(GLTF_MODEL_PATH("Suzanne"));
-
-  auto texture = data.textures[0];
-  EXPECT_EQ(texture.name, "Suzanne_BaseColor.png");
-  EXPECT_EQ(texture.filename, GLTF_MODEL_DIR "/2.0/Suzanne/glTF/Suzanne_BaseColor.png");
-
-  auto mesh = data.meshes[0];
-  EXPECT_EQ(mesh.name, "Suzanne (1)");
-  EXPECT_EQ(mesh.vertices.size(), 11808);
-  EXPECT_EQ(mesh.indices.size(),11808);
-}
-
 TEST(UtilsTest, Reverse) {
-  using utils::Reverse, utils::range, std::vector, std::string;
+  using utils::Reverse, utils::Range, std::vector, std::string;
   {
     std::string result;
     std::string expected = "4,3,2,1,0,";
-    for (auto i : Reverse{range(5)}) {
+    for (auto i : Reverse{Range(5)}) {
       result += fmt::format("{},", i);
     }
     EXPECT_EQ(result, expected);
@@ -344,7 +330,8 @@ TEST(UtilsTest, Reverse) {
   }
 }
 
-TEST(UtilsTest, range) {
+TEST(UtilsTest, Range) {
+  using utils::Range;
   std::string result = "\n";
   std::string expected = R"(
 1:
@@ -361,9 +348,9 @@ TEST(UtilsTest, range) {
   - 3
 )";
 
-  for (auto i : utils::range(1, 4)) {
+  for (auto i : Range{1, 4}) {
     result += fmt::format("{}:\n", i);
-    for (auto j : utils::range(i + 1)) {
+    for (auto j : Range{i + 1}) {
       result += fmt::format("  - {}\n", j);
     }
   }
@@ -371,7 +358,8 @@ TEST(UtilsTest, range) {
   EXPECT_EQ(result, expected);
 }
 
-TEST(UtilsTest, enumerate) {
+TEST(UtilsTest, Enumerate) {
+  using utils::Enumerate;
   std::string argv1[] =            {"some_program", "--force", "-n", "2", "xxx", "yyy"};
   std::vector<std::string> argv2 = {"some_program", "--force", "-n", "2", "xxx", "yyy"};
 
@@ -385,10 +373,10 @@ TEST(UtilsTest, enumerate) {
 4: xxx
 5: yyy
 )";
-  for (auto [i, x_ptr] : utils::enumerate(argv1, 6)) {
+  for (auto [i, x_ptr] : Enumerate{argv1, 6}) {
     result1 += fmt::format("{}: {}\n", i, *x_ptr);
   }
-  for (auto [i, x_ptr] : utils::enumerate(argv2)) {
+  for (auto [i, x_ptr] : Enumerate{argv2}) {
     result2 += fmt::format("{}: {}\n", i, *x_ptr);
   }
   EXPECT_EQ(result1, expected);
