@@ -235,7 +235,7 @@ struct RayTriangleResult {
   fvec3 p;            // return this since it's used during the test anyway.
 };
 
-RayTriangleResult Ray_Triangle(
+inline RayTriangleResult Ray_Triangle(
     const fvec3& src, const fvec3& dir,
     const fvec3& p0, const fvec3& p1, const fvec3& p2) {
   using glm::cross, glm::dot, glm::fmat2;
@@ -527,12 +527,77 @@ inline std::tuple<fvec3, fvec3, fvec3> decomposeTransform(const fmat4& xform) {
   };
 }
 
-inline fmat4 composeTransform(const fvec3 s, const fvec3 r, const fvec3 t) {
+inline fmat4 composeTransform(const fvec3& s, const fvec3& r, const fvec3& t) {
   fmat3 R = ExtrinsicEulerXYZ_to_SO3(r);
   return { {R[0] * s.x, 0},
            {R[1] * s.y, 0},
            {R[2] * s.z, 0},
            {         t, 1}, };
+}
+
+inline fmat4 translateTransform(const fvec3& t) {
+  return fmat4{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {t, 1}};
+}
+
+inline fmat4 lookatTransform(fvec3 src, fvec3 dest, fvec3 up) {
+  // look at "dest" from "src" with new frame x' y' z' such that dot(up, y') > 0 and dot(up, x') = 0:
+  // z' = normalize(src - dest)
+  // x' = normalize(y [cross] z')    (TODO: take care z' ~ y)
+  // y' = z' [cross] x'
+  auto z = glm::normalize(src - dest);
+  auto x = glm::normalize(glm::cross(up, z));
+  auto y = glm::cross(z, x);
+  return {
+    fvec4{x, 0},
+    fvec4{y, 0},
+    fvec4{z, 0},
+    fvec4{src, 1},
+  };
+}
+
+// Extracted from imgui::CameraViewExperiment
+enum struct PivotControlType { ROTATION, ZOOM, MOVE };
+inline void pivotControl(
+    fmat4& xform,       // inout
+    fvec3& pivot,       // in (out when MOVE)
+    const fvec2& delta, // radians (ROTATION), length (ZOOM, MOVE)
+    PivotControlType type
+) {
+  fvec3 position = fvec3{xform[3]};
+  float L = glm::length(position - pivot);
+  fmat4 pivot_xform = xform * translateTransform({0.f, 0.f, -L});
+
+  switch (type) {
+    case PivotControlType::ROTATION: {
+      // NOTE:
+      // - "delta.x" is for rotation of "usual" axial part of spherical coord.
+      // - "delta.y" cannot be handled this way since it's domain is "theta \in [0, phi]".
+      //   but, by utilizing our `pivot_xform`, it can traverse great circle which passes north/south pole.
+      // - In tern, "delta.x" is not handled like "delta.y" since that would make camera pass through equator.
+      // - Note that another complication of "u.x" where camera's up vector can be flipped.
+
+      // up/down (u.y)
+      fmat3 A = ExtrinsicEulerXYZ_to_SO3({-delta.y, 0, 0});
+      xform = pivot_xform * fmat4{A} * translateTransform({0, 0, L});
+
+      // left/right (u.x)
+      fmat4 pivot_xform_v2 = lookatTransform(pivot, {position.x, pivot.y, position.z}, {0, 1, 0});
+      fmat4 view_xform_wrt_pivot_v2 = inverseTR(pivot_xform_v2) * xform;
+      bool camera_flipped = view_xform_wrt_pivot_v2[1].y < 0;
+      fmat3 B = ExtrinsicEulerXYZ_to_SO3({0, camera_flipped ? delta.x : -delta.x, 0});
+      xform = pivot_xform_v2 * fmat4{B} * view_xform_wrt_pivot_v2;
+      break;
+    }
+    case PivotControlType::ZOOM: {
+      xform = pivot_xform * translateTransform({0, 0, L - delta.x});
+      break;
+    }
+    case PivotControlType::MOVE: {
+      xform = pivot_xform * translateTransform({-delta.x, delta.y, L});
+      pivot = fvec3{pivot_xform * fvec4{-delta.x, delta.y, 0, 1}};
+      break;
+    }
+  }
 }
 
 //

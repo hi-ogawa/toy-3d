@@ -182,6 +182,9 @@ struct ViewportPanel : Panel {
     fvec3 camera_position;
     fvec3 mouse_direction; // mouse_position_scene - camera_position
 
+    // UI state
+    fvec3 pivot = {0, 0, 0};
+
     // debug
     bool overlay = true;
     bool debug_sceneCo_imguiCo = true;
@@ -290,6 +293,18 @@ struct ViewportPanel : Panel {
   }
 
   void UI_Gizmo() {
+    if (ImGui::IsMouseDown(0)) {
+      fvec2 delta = ImGui::GetIO().MouseDelta.glm() / fvec2{framebuffer_->size_};
+      if (ImGui::GetIO().KeyCtrl) {
+        pivotControl(camera_.transform_, ctx_.pivot, delta * fvec2{2 * 3.14, 3.14}, PivotControlType::ROTATION);
+      }
+      if (ImGui::GetIO().KeyAlt) {
+        pivotControl(camera_.transform_, ctx_.pivot, delta * 4.f, PivotControlType::ZOOM);
+      }
+      if (ImGui::GetIO().KeyShift) {
+        pivotControl(camera_.transform_, ctx_.pivot, delta * 4.f, PivotControlType::MOVE);
+      }
+    }
     if (ctx_.debug_ray_test && ImGui::IsMouseDown(0)) {
       auto result = mng_.rayTest(ctx_.camera_position, ctx_.mouse_direction);
       draw_list_->AddCircleFilled(
