@@ -24,7 +24,7 @@ struct Panel {
   ivec2 offset_;
   ivec2 size_;
 
-  // layout info without menubar and "imgui window" padding
+  // layout info without menubar
   ivec2 content_offset_;
   ivec2 content_size_;
 
@@ -269,27 +269,23 @@ struct PanelManager {
 
   void _processPanels() {
     layout_.forEachLeaf(content_size_, [&](Leaf& leaf, ivec2 offset, ivec2 size) {
-      ImVec2 _offset = toImVec2(offset + content_offset_);
-      ImVec2 _size = toImVec2(size);
-      ImGui::SetNextWindowPos(_offset);
-      ImGui::SetNextWindowSize(_size);
+      auto& panel = panels_.at(leaf.value_);
+      panel->offset_ = offset + content_offset_;
+      panel->size_ = size;
+      ImGui::SetNextWindowPos(ImVec2{panel->offset_});
+      ImGui::SetNextWindowSize(ImVec2{panel->size_});
       auto flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_MenuBar |
                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_HorizontalScrollbar;
-      if (resize_context_.hovoring) {
-        flags |= ImGuiWindowFlags_NoMouseInputs;
-      }
-      auto& panel = panels_.at(leaf.value_);
-      panel->offset_ = offset;
-      panel->size_ = size;
-      panel->_pushStyleVars();
+      if (resize_context_.hovoring) { flags |= ImGuiWindowFlags_NoMouseInputs; }
+      panel->_pushStyleVars(); // NOTE: not used currently
       if (auto _ = ImScoped::Window(panel->id_.data(), nullptr, flags)) {
         panel->_popStyleVars();
         // Directly probe ImGuiWindow about layout info
         auto this_imgui_window = ImGui::GetCurrentWindowRead();
-        auto window_padding = fromImVec2<int>(this_imgui_window->WindowPadding);
-        panel->content_offset_ = ivec2{0, this_imgui_window->MenuBarHeight()} + window_padding;
-        panel->content_size_ = size - panel->content_offset_ - window_padding;
+        ivec2 misc_offset = ivec2{0, this_imgui_window->MenuBarHeight()};
+        panel->content_offset_ = panel->offset_ + misc_offset;
+        panel->content_size_ = size - misc_offset;
         processPanelMenu(*panel);
         panel->processUI();
       }

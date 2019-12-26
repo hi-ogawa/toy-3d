@@ -124,6 +124,92 @@ struct SceneManager {
 // UIs
 //
 
+// TODO
+// - [@] mouse ray debugger
+struct ViewportPanel : Panel {
+  constexpr static const char* type = "Viewport";
+  unique_ptr<utils::gl::Framebuffer> framebuffer_;
+  const SceneManager& mng_;
+  ImDrawList* draw_list_;
+  struct DrawChannel { // scoped untyped enum
+    enum {
+      SCENE_IMAGE = 0,
+      GIZMO,
+      OVERLAY,
+      CHANNELS_COUNT,
+    };
+  };
+  bool debug_overlay_ = true;
+
+  ViewportPanel(const SceneManager& mng) : mng_{mng} {
+    framebuffer_.reset(new utils::gl::Framebuffer);
+  }
+
+  void UI_Overlay() {
+    // NOTE: ImGui::Columns internally use `Channels`,
+    //       so instantiating them without a child window would cause conflict with our use.
+    if (debug_overlay_) {
+      auto _ = ImScoped::Child(__FILE__, ImVec2{content_size_.x / 3.0f, 400.0f}, true, ImGuiWindowFlags_NoMove);
+      auto _drawColumns = [](const std::map<const char*, ivec2*>& rows) {
+        for (auto [name, data] : rows) {
+          ImGui::TextUnformatted(name);
+          ImGui::NextColumn();
+          ImGui::SetNextItemWidth(-1);
+          ImGui::InputInt2(fmt::format("###{}", name).data(), (int*)data, ImGuiInputTextFlags_ReadOnly);
+          ImGui::NextColumn();
+        }
+      };
+      if (ImGui::CollapsingHeader("Size/Offset", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Columns(2, __FILE__, true);
+        _drawColumns({
+            {"offset_",         &offset_        },
+            {"size_",           &size_          },
+            {"content_offset_", &content_offset_},
+            {"content_size_",   &content_size_  },
+        });
+        ImGui::Columns(1);
+      };
+      if (ImGui::CollapsingHeader("Mouse", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ivec2 mouse_pos = ImGui::GetMousePos().glm();
+        ivec2 mouse_pos_vp = mouse_pos - content_offset_;
+        ImGui::Columns(2, __FILE__, true);
+        _drawColumns({
+            {"mouse (global)",   &mouse_pos   },
+            {"mouse (viewport)", &mouse_pos_vp},
+        });
+        ImGui::Columns(1);
+      }
+    }
+  }
+
+  void processMenu() override {
+    if (auto _ = ImScoped::Menu("Overlay")) {
+      if (ImGui::MenuItem("Debug", nullptr, debug_overlay_)) {
+        debug_overlay_ = !debug_overlay_;
+      }
+    }
+  }
+
+  void processUI() override {
+    draw_list_ = ImGui::GetWindowDrawList();
+    draw_list_->ChannelsSplit(DrawChannel::CHANNELS_COUNT);
+    draw_list_->ChannelsSetCurrent(DrawChannel::OVERLAY);
+    UI_Overlay();
+  }
+
+  void processPostUI() override {
+    framebuffer_->setSize({content_size_[0], content_size_[1]});
+    mng_.draw(*framebuffer_);
+    draw_list_->ChannelsSetCurrent(DrawChannel::SCENE_IMAGE);
+    ImGui::GetWindowDrawList()->AddImage(
+      reinterpret_cast<ImTextureID>(framebuffer_->texture_handle_),
+      ImVec2{content_offset_}, ImVec2{content_offset_ + content_size_},
+        /* uv0 */ {0, 1}, /* uv1 */ {1, 0});
+    draw_list_->ChannelsMerge();
+  }
+};
+
+// ViewportPanel without any editor functionality
 struct RenderPanel : Panel {
   constexpr static const char* type = "Render";
   unique_ptr<utils::gl::Framebuffer> framebuffer_;
@@ -267,6 +353,8 @@ struct App {
     panel_manager_->registerPanelType<MetricsPanel>();
     panel_manager_->registerPanelType<DemoPanel>();
 
+    panel_manager_->registerPanelType<ViewportPanel>([&]() {
+        return new ViewportPanel{*scene_manager_}; });
     panel_manager_->registerPanelType<RenderPanel>([&]() {
         return new RenderPanel{*scene_manager_}; });
     panel_manager_->registerPanelType<AssetsPanel>([&]() {
@@ -274,7 +362,7 @@ struct App {
 
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, AssetsPanel::type);
     panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, DemoPanel::type, 0.6);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, RenderPanel::type, 0.5);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, ViewportPanel::type, 0.5);
   }
 
   void UI_MainMenuBar() {
