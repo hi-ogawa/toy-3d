@@ -418,3 +418,27 @@ TODO simpler_render_example
   - node/mesh hit testing
     - bvh theory
     - bvh implementation
+    - cf. yocto/gl (yocto_bvh)
+
+
+# 2019/12/25
+
+- [x] clip polygon to halfspace in R^4
+
+- [ ] scene editor viewport
+  - node/mesh hit testing
+    - bvh theory
+    - bvh implementation
+    - cf. yocto/gl (yocto_bvh)
+  - camera control
+  - transform gizmo
+
+- [ ] bvh theory
+
+- c++
+  - code coverage tooling
+    - https://clang.llvm.org/docs/SourceBasedCodeCoverage.html
+    - https://github.com/codecov/example-cpp11-cmake
+
+
+# 2019/12/26
