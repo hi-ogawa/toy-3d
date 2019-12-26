@@ -278,7 +278,7 @@ struct PanelManager {
                    ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                    ImGuiWindowFlags_HorizontalScrollbar;
       if (resize_context_.hovoring) { flags |= ImGuiWindowFlags_NoMouseInputs; }
-      panel->_pushStyleVars(); // NOTE: not used currently
+      panel->_pushStyleVars(); // NOTE: not used currently (thought it's useful to tweak "imgui window" padding etc...)
       if (auto _ = ImScoped::Window(panel->id_.data(), nullptr, flags)) {
         panel->_popStyleVars();
         // Directly probe ImGuiWindow about layout info

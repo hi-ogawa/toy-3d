@@ -43,12 +43,12 @@ struct SceneRenderer {
     }
   }
 
-  void draw(const Scene& scene) {
+  void _draw(const Scene& scene, const Camera& camera) {
     glUseProgram(program_->handle_);
 
     // global uniform
-    program_->setUniform("view_inv_xform_", utils::inverseTR(scene.camera_.transform_));
-    program_->setUniform("view_projection_", scene.camera_.getPerspectiveProjection());
+    program_->setUniform("view_inv_xform_", utils::inverseTR(camera.transform_));
+    program_->setUniform("view_projection_", camera.getPerspectiveProjection());
     program_->setUniform("base_color_texture_", 0);
 
     for (auto& node : scene.nodes_) {
@@ -73,6 +73,27 @@ struct SceneRenderer {
       node->mesh_->rr_->base_.draw();
     }
   }
+
+  void draw(
+      const Scene& scene,
+      const Camera& camera,
+      const gl::Framebuffer& framebuffer,
+      fvec4 clear_color = {0, 0, 0, 0}) {
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer.framebuffer_handle_);
+
+    // rendering configuration
+    glEnable(GL_CULL_FACE); // TODO: cull face per material
+    glEnable(GL_DEPTH_TEST);
+
+    // clear buffer
+    glClearBufferfv(GL_COLOR, 0, (GLfloat*)&clear_color);
+    float depth = 1;
+    glClearBufferfv(GL_DEPTH, 0, (GLfloat*)&depth);
+
+    // really draw
+    glViewport(0, 0, framebuffer.size_.x, framebuffer.size_.y);
+    _draw(scene, camera);
+  }
 };
 
 
@@ -84,9 +105,6 @@ struct SceneManager {
   SceneManager() {
     scene_.reset(new Scene);
     renderer_.reset(new SceneRenderer);
-
-    // default camera position
-    scene_->camera_.transform_[3] = fvec4{0, 0, 4, 1};
   }
 
   void loadGltf(const char* filename) {
@@ -97,26 +115,6 @@ struct SceneManager {
     }
     renderer_->updateRenderResouce(*scene_);
   }
-
-  void draw(const gl::Framebuffer& framebuffer) const {
-    // bind non-default framebuffer
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer.framebuffer_handle_);
-
-    // rendering configuration
-    glEnable(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
-
-    // clear buffer
-    glm::fvec4 color = {0.2, 0.2, 0.2, 1.0};
-    glClearBufferfv(GL_COLOR, 0, (GLfloat*)&color);
-    float depth = 1;
-    glClearBufferfv(GL_DEPTH, 0, (GLfloat*)&depth);
-
-    // draw
-    glViewport(0, 0, framebuffer.size_.x, framebuffer.size_.y);
-    scene_->camera_.aspect_ratio_ = (float)framebuffer.size_.x / framebuffer.size_.y; // TODO: shouldn't change property here.
-    renderer_->draw(*scene_);
-  }
 };
 
 
@@ -125,31 +123,96 @@ struct SceneManager {
 //
 
 // TODO
-// - [@] mouse ray debugger
+// - setup bvh for each Mesh
+// - traverse bvh for mouse ray test
 struct ViewportPanel : Panel {
   constexpr static const char* type = "Viewport";
   unique_ptr<utils::gl::Framebuffer> framebuffer_;
   const SceneManager& mng_;
   ImDrawList* draw_list_;
-  struct DrawChannel { // scoped untyped enum
-    enum {
-      SCENE_IMAGE = 0,
-      GIZMO,
-      OVERLAY,
-      CHANNELS_COUNT,
-    };
-  };
-  bool debug_overlay_ = true;
+  Camera camera_;
+
+  struct DrawChannel { enum { // scoped untyped enum
+    SCENE_IMAGE = 0,
+    GIZMO,
+    OVERLAY,
+    CHANNELS_COUNT,
+  };};
+  struct UIContext {
+    // refreshed on new frame
+    ivec2 mouse_position_imgui;
+    fvec3 mouse_position_scene;
+    fmat3 ndCo_to_imguiCo;           // 2d homog transform (here, ndCo without depth)
+    fmat3 imguiCo_to_ndCo;
+    fmat4 sceneCo_to_clipCo;
+    glm::fmat3x4 ndCo_to_sceneCo;    // injection to SceneCo as CameraCo at z = -1
+    glm::fmat3x4 imguiCo_to_sceneCo; // ndCo_to_sceneCo * imguiCo_to_ndCo
+
+    // debug
+    bool overlay = true;
+    bool debug_sceneCo_imguiCo = true;
+  } ctx_;
 
   ViewportPanel(const SceneManager& mng) : mng_{mng} {
     framebuffer_.reset(new utils::gl::Framebuffer);
+    camera_.transform_[3] = fvec4{0, 0, 4, 1};
+  }
+
+  ivec2 convert_sceneCo_to_imguiCo(fvec3 p1) {
+    fvec4 p2 = ctx_.sceneCo_to_clipCo * fvec4{p1, 1};  // ClipCo
+    fvec2 p3 = fvec2{p2.x, p2.y} / p2.w;               // NDCo (without depth)
+    return ivec2{ctx_.ndCo_to_imguiCo * fvec3{p3, 1}};
+  }
+
+  fvec3 convert_imguiCo_to_sceneCo(ivec2 q1) {
+    return ctx_.imguiCo_to_sceneCo * fvec3{q1, 1};
+  }
+
+  void _setupContext() {
+    {
+      fmat4 projection = camera_.getPerspectiveProjection();
+      ctx_.sceneCo_to_clipCo = projection * inverseTR(camera_.transform_);
+
+      float sx = projection[0][0], sy = projection[1][1];
+      glm::fmat3x4 ndCo_to_CameraCo = {
+        1/sx,    0,  0, 0,
+           0, 1/sy,  0, 0,
+           0,    0, -1, 1,  // CameraCo at z = -1
+      };
+      ctx_.ndCo_to_sceneCo = camera_.transform_ * ndCo_to_CameraCo;
+    }
+    {
+      float L = content_offset_.x;
+      float T = content_offset_.y;
+      float W = content_size_.x;
+      float H = content_size_.y;
+      // Derived via (T: translation, S: scale)
+      // T(L, T) * S(W, H) * S(1/2, 1/2) * T(1/2, 1/2) * S(1, -1)
+      ctx_.ndCo_to_imguiCo = {
+            W/2,          0,    0,
+              0,       -H/2,    0,
+        L + W/2,    T + H/2,    1,
+      };
+      ctx_.imguiCo_to_ndCo = glm::inverse(ctx_.ndCo_to_imguiCo);
+    }
+    ctx_.imguiCo_to_sceneCo = ctx_.ndCo_to_sceneCo * ctx_.imguiCo_to_ndCo;
+    ctx_.mouse_position_imgui = ImGui::GetMousePos().glm();
+    ctx_.mouse_position_scene = convert_imguiCo_to_sceneCo(ctx_.mouse_position_imgui);
+  }
+
+  void processMenu() override {
+    if (auto _ = ImScoped::Menu("Edit")) {
+      if (ImGui::MenuItem("Overlay", nullptr, ctx_.overlay)) {
+        ctx_.overlay = !ctx_.overlay;
+      }
+    }
   }
 
   void UI_Overlay() {
     // NOTE: ImGui::Columns internally use `Channels`,
     //       so instantiating them without a child window would cause conflict with our use.
-    if (debug_overlay_) {
-      auto _ = ImScoped::Child(__FILE__, ImVec2{content_size_.x / 3.0f, 400.0f}, true, ImGuiWindowFlags_NoMove);
+    if (ctx_.overlay) {
+      auto _ = ImScoped::Child(__FILE__, ImVec2{content_size_.x / 2.5f, 0.f}, false, ImGuiWindowFlags_NoMove);
       auto _drawColumns = [](const std::map<const char*, ivec2*>& rows) {
         for (auto [name, data] : rows) {
           ImGui::TextUnformatted(name);
@@ -170,68 +233,80 @@ struct ViewportPanel : Panel {
         ImGui::Columns(1);
       };
       if (ImGui::CollapsingHeader("Mouse", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ivec2 mouse_pos = ImGui::GetMousePos().glm();
-        ivec2 mouse_pos_vp = mouse_pos - content_offset_;
         ImGui::Columns(2, __FILE__, true);
         _drawColumns({
-            {"mouse (global)",   &mouse_pos   },
-            {"mouse (viewport)", &mouse_pos_vp},
+            {"mouse (imgui)",    &ctx_.mouse_position_imgui },
         });
         ImGui::Columns(1);
+        ImGui::InputFloat3("mouse (scene)", (float*)&ctx_.mouse_position_scene, 2, ImGuiInputTextFlags_ReadOnly);
+      }
+      if (ImGui::CollapsingHeader("Debug", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ivec2 v = convert_sceneCo_to_imguiCo(ctx_.mouse_position_scene);
+        ImGui::Text("mouse (imgui -> scene -> imgui)");
+        ImGui::InputInt2("###sceneCo_to_imguiCo", (int*)&v, ImGuiInputTextFlags_ReadOnly);
+
+        ImGui::Text("Debug sceneCo <-> imguiCo"); ImGui::SameLine();
+        ImGui::Checkbox("###scenCo<->imguiCo", &ctx_.debug_sceneCo_imguiCo);
       }
     }
   }
 
-  void processMenu() override {
-    if (auto _ = ImScoped::Menu("Overlay")) {
-      if (ImGui::MenuItem("Debug", nullptr, debug_overlay_)) {
-        debug_overlay_ = !debug_overlay_;
-      }
+  void UI_Gizmo() {
+    if (ctx_.debug_sceneCo_imguiCo) {
+      // Demo sceneCo <-> imguiCo
+      fvec3 o = {0, 0, 0};
+      fvec3 z = glm::normalize(ctx_.mouse_position_scene);
+      fvec3 x = glm::normalize(glm::cross(fvec3{0, 1, 0}, z));;
+      fvec3 y = glm::normalize(glm::cross(z, x));
+
+      auto _o = ImVec2{convert_sceneCo_to_imguiCo(o / 2.0f)};
+      auto _x = ImVec2{convert_sceneCo_to_imguiCo(x / 2.0f)};
+      auto _y = ImVec2{convert_sceneCo_to_imguiCo(y / 2.0f)};
+      auto _z = ImVec2{convert_sceneCo_to_imguiCo(z / 2.0f)};
+      ImU32 w = ImGui::GetColorU32({1, 1, 1, 0.6f});
+      ImU32 r = ImGui::GetColorU32({1, 0, 0, 0.6f});
+      ImU32 g = ImGui::GetColorU32({0, 1, 0, 0.6f});
+      ImU32 b = ImGui::GetColorU32({0, 0, 1, 0.6f});
+
+      draw_list_->AddLine(_o, _x, r);
+      draw_list_->AddLine(_o, _y, g);
+      draw_list_->AddLine(_o, _z, b);
+      draw_list_->AddCircleFilled(_o, 4.0f, w);
+      draw_list_->AddCircleFilled(_x, 4.0f, r);
+      draw_list_->AddCircleFilled(_y, 4.0f, g);
+      draw_list_->AddCircleFilled(_z, 4.0f, b);
     }
   }
 
   void processUI() override {
+    // Setup
+    camera_.aspect_ratio_ = (float)content_size_[0] / content_size_[1];
+    framebuffer_->setSize({content_size_[0], content_size_[1]});
     draw_list_ = ImGui::GetWindowDrawList();
+    _setupContext();
+
+    // Draw UI
     draw_list_->ChannelsSplit(DrawChannel::CHANNELS_COUNT);
     draw_list_->ChannelsSetCurrent(DrawChannel::OVERLAY);
     UI_Overlay();
-  }
-
-  void processPostUI() override {
-    framebuffer_->setSize({content_size_[0], content_size_[1]});
-    mng_.draw(*framebuffer_);
-    draw_list_->ChannelsSetCurrent(DrawChannel::SCENE_IMAGE);
-    ImGui::GetWindowDrawList()->AddImage(
-      reinterpret_cast<ImTextureID>(framebuffer_->texture_handle_),
-      ImVec2{content_offset_}, ImVec2{content_offset_ + content_size_},
-        /* uv0 */ {0, 1}, /* uv1 */ {1, 0});
-    draw_list_->ChannelsMerge();
-  }
-};
-
-// ViewportPanel without any editor functionality
-struct RenderPanel : Panel {
-  constexpr static const char* type = "Render";
-  unique_ptr<utils::gl::Framebuffer> framebuffer_;
-  const SceneManager& mng_;
-
-  RenderPanel(const SceneManager& mng) : mng_{mng} {
-    framebuffer_.reset(new utils::gl::Framebuffer);
-    style_vars_ = { {ImGuiStyleVar_WindowPadding, ImVec2{0, 0} } };
-  }
-
-  void processUI() override {
-    framebuffer_->setSize({content_size_[0], content_size_[1]});
+    draw_list_->ChannelsSetCurrent(DrawChannel::GIZMO);
+    UI_Gizmo();
   }
 
   // NOTE: this will be called after PanelManager handled insert/split/close etc...
   //       so, ImGui won't use texture if panel is closed within current event loop,
   //       which would cause "message = GL_INVALID_OPERATION in glBindTexture(non-gen name)".
   void processPostUI() override {
-    mng_.draw(*framebuffer_);
-    ImGui::Image(
-        reinterpret_cast<ImTextureID>(framebuffer_->texture_handle_),
-        ImVec2{framebuffer_->size_}, /* uv0 */ {0, 1}, /* uv1 */ {1, 0});
+    mng_.renderer_->draw(*mng_.scene_, camera_, *framebuffer_);
+
+    // Show texture as ImGui quad
+    draw_list_->ChannelsSetCurrent(DrawChannel::SCENE_IMAGE);
+    ImGui::GetWindowDrawList()->AddImage(
+      reinterpret_cast<ImTextureID>(framebuffer_->texture_handle_),
+      ImVec2{content_offset_}, ImVec2{content_offset_ + content_size_},
+        /* uv0 */ {0, 1}, /* uv1 */ {1, 0});
+
+    draw_list_->ChannelsMerge();
   }
 };
 
@@ -355,14 +430,12 @@ struct App {
 
     panel_manager_->registerPanelType<ViewportPanel>([&]() {
         return new ViewportPanel{*scene_manager_}; });
-    panel_manager_->registerPanelType<RenderPanel>([&]() {
-        return new RenderPanel{*scene_manager_}; });
     panel_manager_->registerPanelType<AssetsPanel>([&]() {
         return new AssetsPanel{*scene_manager_}; });
 
     panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, AssetsPanel::type);
     panel_manager_->addPanelToRoot(kdtree::SplitType::VERTICAL, DemoPanel::type, 0.6);
-    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, ViewportPanel::type, 0.5);
+    panel_manager_->addPanelToRoot(kdtree::SplitType::HORIZONTAL, ViewportPanel::type, 0.3);
   }
 
   void UI_MainMenuBar() {
