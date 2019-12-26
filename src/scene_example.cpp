@@ -114,6 +114,39 @@ struct SceneManager {
       scene_->nodes_.push_back(node);
     }
     renderer_->updateRenderResouce(*scene_);
+    SceneManager::setupBVH(*scene_);
+  }
+
+  // TODO: Not sure where to put this
+  static void setupBVH(const Scene& scene) {
+    for (auto& node : scene.nodes_) {
+      if (node->mesh_ && !node->mesh_->bvh_) {
+        Mesh& mesh = *node->mesh_;
+        mesh.bvh_.reset(new MeshBVH{mesh});
+      }
+    }
+  }
+
+  MeshBVH::RayTestResult rayTest(const fvec3& src, const fvec3& dir) const {
+    MeshBVH::RayTestResult result = { .hit = false, .t = FLT_MAX };
+    for (auto& node : scene_->nodes_) {
+      if (!node->mesh_) { continue; }
+
+      Mesh& mesh = *node->mesh_;
+      auto tmp_result = mesh.bvh_->rayTest(
+          glm::inverse(node->transform_) * fvec4{src, 1},
+          glm::inverse(fmat3{node->transform_}) * dir);
+      if (!tmp_result.hit) { continue; }
+      if (!(tmp_result.t < result.t)) { continue; }
+
+      result.hit = true;
+      result.t = tmp_result.t;
+      result.point = fvec3{node->transform_ * fvec4{tmp_result.point, 1}};
+      for (auto i : Range{3}) {
+        result.face[i] = fvec3{node->transform_ * fvec4{tmp_result.face[i], 1}};
+      }
+    }
+    return result;
   }
 };
 
@@ -122,9 +155,6 @@ struct SceneManager {
 // UIs
 //
 
-// TODO
-// - setup bvh for each Mesh
-// - traverse bvh for mouse ray test
 struct ViewportPanel : Panel {
   constexpr static const char* type = "Viewport";
   unique_ptr<utils::gl::Framebuffer> framebuffer_;
@@ -145,12 +175,17 @@ struct ViewportPanel : Panel {
     fmat3 ndCo_to_imguiCo;           // 2d homog transform (here, ndCo without depth)
     fmat3 imguiCo_to_ndCo;
     fmat4 sceneCo_to_clipCo;
-    glm::fmat3x4 ndCo_to_sceneCo;    // injection to SceneCo as CameraCo at z = -znear
+    glm::fmat3x4 ndCo_to_sceneCo;    // injection to SceneCo as CameraCo at z = -1
     glm::fmat3x4 imguiCo_to_sceneCo; // ndCo_to_sceneCo * imguiCo_to_ndCo
+
+    // some shortcut
+    fvec3 camera_position;
+    fvec3 mouse_direction; // mouse_position_scene - camera_position
 
     // debug
     bool overlay = true;
     bool debug_sceneCo_imguiCo = true;
+    bool debug_ray_test = true;
   } ctx_;
 
   ViewportPanel(const SceneManager& mng) : mng_{mng} {
@@ -174,11 +209,11 @@ struct ViewportPanel : Panel {
       fmat4 projection = camera_.getPerspectiveProjection();
       ctx_.sceneCo_to_clipCo = projection * inverseTR(camera_.transform_);
 
-      float sx = projection[0][0], sy = projection[1][1], n = camera_.znear_;
+      float sx = projection[0][0], sy = projection[1][1], n = 1; // TODO: n = camera_.znear_ is more useful?
       glm::fmat3x4 ndCo_to_CameraCo = {
-        1/sx,    0,  0, 0,
-           0, 1/sy,  0, 0,
-           0,    0, -n, 1,  // CameraCo at z = -znear
+        n/sx,    0,  0, 0,
+           0, n/sy,  0, 0,
+           0,    0, -n, 1,  // CameraCo at z = -1
       };
       ctx_.ndCo_to_sceneCo = camera_.transform_ * ndCo_to_CameraCo;
     }
@@ -199,6 +234,8 @@ struct ViewportPanel : Panel {
     ctx_.imguiCo_to_sceneCo = ctx_.ndCo_to_sceneCo * ctx_.imguiCo_to_ndCo;
     ctx_.mouse_position_imgui = ImGui::GetMousePos().glm();
     ctx_.mouse_position_scene = convert_imguiCo_to_sceneCo(ctx_.mouse_position_imgui);
+    ctx_.camera_position = fvec3{camera_.transform_[3]};
+    ctx_.mouse_direction = ctx_.mouse_position_scene - ctx_.camera_position;
   }
 
   void processMenu() override {
@@ -253,10 +290,24 @@ struct ViewportPanel : Panel {
   }
 
   void UI_Gizmo() {
+    if (ctx_.debug_ray_test && ImGui::IsMouseDown(0)) {
+      auto result = mng_.rayTest(ctx_.camera_position, ctx_.mouse_direction);
+      draw_list_->AddCircleFilled(
+          ImVec2{convert_sceneCo_to_imguiCo(ctx_.mouse_position_scene)}, 4.0f,
+          result.hit ? IM_COL32(255, 255, 0, 255) : IM_COL32(255, 255, 255, 255));
+
+      if (result.hit) {
+        draw_list_->PathClear();
+        for (auto i : Range{3}) {
+          draw_list_->PathLineTo(ImVec2{convert_sceneCo_to_imguiCo(result.face[i])});
+        }
+        draw_list_->PathFillConvex(ImGui::GetColorU32({1, 0, 1, .8}));
+      }
+    }
     if (ctx_.debug_sceneCo_imguiCo) {
-      // Demo sceneCo <-> imguiCo
+      // Demo for sceneCo <-> imguiCo convertion
       fvec3 o = {0, 0, 0};
-      fvec3 z = glm::normalize(ctx_.mouse_position_scene);
+      fvec3 z = glm::normalize(ctx_.camera_position + 2.0f * ctx_.mouse_direction);
       fvec3 x = glm::normalize(glm::cross(fvec3{0, 1, 0}, z));;
       fvec3 y = glm::normalize(glm::cross(z, x));
 

@@ -442,3 +442,7 @@ TODO simpler_render_example
 
 
 # 2019/12/26
+
+- bvh theory/impelemtation
+  - single mesh (i.e. set of triangles)
+  - integration

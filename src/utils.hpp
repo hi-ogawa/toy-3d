@@ -228,6 +228,51 @@ inline auto Line_Sphere(
   return std::make_pair(t - dt, t + dt);
 }
 
+struct RayTriangleResult {
+  bool valid = false; // "hit" is determined by uv \in 2-standard-simplex (i.e. u + v <= 1 and u, v >= 0)
+  float t;            // always t >= 0
+  fvec2 uv;
+  fvec3 p;            // return this since it's used during the test anyway.
+};
+
+RayTriangleResult Ray_Triangle(
+    const fvec3& src, const fvec3& dir,
+    const fvec3& p0, const fvec3& p1, const fvec3& p2) {
+  using glm::cross, glm::dot, glm::fmat2;
+  RayTriangleResult result;
+
+  fvec3 v1 = p1 - p0;
+  fvec3 v2 = p2 - p0;
+  fvec3 n = cross(v1, v2);
+
+  // degenerate triangle
+  if (_isSmall(glm::length(n))) { return result; }
+
+  std::optional<float> t = Line_Plane(src, dir, p0, n);
+
+  // parallel or opposite direction to the plane spanned by v1, v2
+  if (!t || (t && *t < 0)) { return result; }
+
+  result.valid = true;
+  result.t = t.value();
+  result.p = src + t.value() * dir;
+  fvec3 q = result.p - p0;
+  //
+  // Here q \in span{v1, v2}, i.e.
+  //
+  // q = / v1, v2 \  / s \  for some s, t.
+  //     \        /  \ t /
+  // thus,
+  // / <v1, q> \  =  / <v1, v1>, <v1, v2> \  / s \
+  // \ <v2, q> /     \ <v1, v2>, <v2, v2> /  \ t /
+  //
+  float x = dot(v1,  q), y = dot(v2, q);
+  float a = dot(v1, v1), b = dot(v1, v2), d = dot(v2, v2);
+  float det = a * d - b * b;
+  result.uv = {(d * x - b * y) / det, (-b * x + a * y) / det};
+  return result;
+}
+
 inline vector<fvec4> clip4D_ConvexPoly_HalfSpace(
     const vector<fvec4>& vs, // dim(span{vi - v0 | i}) = 2 (thus vs.size() >= 3)
     const fvec4& q,          // half space as { u | dot(u - q, v) >= 0 }

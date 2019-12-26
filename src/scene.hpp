@@ -22,7 +22,7 @@ using std::string, std::vector, std::shared_ptr, std::unique_ptr;
 using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat3, glm::fmat4;
 }
 
-struct MeshRR; struct TextureRR;
+struct MeshRR; struct TextureRR; struct MeshBVH;
 struct Node; struct Mesh; struct Texture; struct Material;
 
 struct VertexAttrs {
@@ -35,6 +35,7 @@ struct VertexAttrs {
 
 struct Mesh {
   unique_ptr<MeshRR> rr_;
+  unique_ptr<MeshBVH> bvh_;
   string name_;
   vector<uint16_t> indices_; // 2**16 = 65536
   vector<VertexAttrs> vertices_;
@@ -114,6 +115,45 @@ struct TextureRR {
   }
 };
 
+// TODO: implement bvh (currently traverses all triangle...)
+struct MeshBVH {
+  Mesh& owner_;
+  MeshBVH(Mesh& mesh) : owner_{mesh} {}
+
+  struct RayTestResult {
+    bool hit;
+    std::array<fvec3, 3> face;
+    fvec3 point;
+    float t;
+  };
+
+  RayTestResult rayTest(const fvec3& src, const fvec3& dir) {
+    auto& vs = owner_.vertices_;
+    auto& is = owner_.indices_;
+    RayTestResult result = { .hit = false, .t = FLT_MAX };
+
+    for (auto k : utils::Range{is.size() / 3}) {
+      size_t l = 3 * k;
+      fvec3& p0 = vs[is[l + 0]].position;
+      fvec3& p1 = vs[is[l + 1]].position;
+      fvec3& p2 = vs[is[l + 2]].position;
+      auto tmp_result = utils::hit::Ray_Triangle(src, dir, p0, p1, p2);
+      if (!tmp_result.valid) { continue; }
+
+      fvec2& uv = tmp_result.uv;
+      bool hit = uv.x >= 0 && uv.y >= 0 && (uv.x + uv.y <= 1);
+      if (!hit) { continue; }
+      if (!(tmp_result.t < result.t)) { continue; }
+
+      result.hit = true;
+      result.t = tmp_result.t;
+      result.face = {p0, p1, p2};
+      result.point = tmp_result.p;
+    }
+
+    return result;
+  }
+};
 
 //
 // gltf importer with cgltf
