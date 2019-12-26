@@ -145,7 +145,7 @@ struct ViewportPanel : Panel {
     fmat3 ndCo_to_imguiCo;           // 2d homog transform (here, ndCo without depth)
     fmat3 imguiCo_to_ndCo;
     fmat4 sceneCo_to_clipCo;
-    glm::fmat3x4 ndCo_to_sceneCo;    // injection to SceneCo as CameraCo at z = -1
+    glm::fmat3x4 ndCo_to_sceneCo;    // injection to SceneCo as CameraCo at z = -znear
     glm::fmat3x4 imguiCo_to_sceneCo; // ndCo_to_sceneCo * imguiCo_to_ndCo
 
     // debug
@@ -169,15 +169,16 @@ struct ViewportPanel : Panel {
   }
 
   void _setupContext() {
+    // TODO: move this computation to utils or utils_imgui
     {
       fmat4 projection = camera_.getPerspectiveProjection();
       ctx_.sceneCo_to_clipCo = projection * inverseTR(camera_.transform_);
 
-      float sx = projection[0][0], sy = projection[1][1];
+      float sx = projection[0][0], sy = projection[1][1], n = camera_.znear_;
       glm::fmat3x4 ndCo_to_CameraCo = {
         1/sx,    0,  0, 0,
            0, 1/sy,  0, 0,
-           0,    0, -1, 1,  // CameraCo at z = -1
+           0,    0, -n, 1,  // CameraCo at z = -znear
       };
       ctx_.ndCo_to_sceneCo = camera_.transform_ * ndCo_to_CameraCo;
     }
