@@ -60,6 +60,48 @@ inline bool InputTransform(
   return changed;
 };
 
+struct DrawList3D {
+  ImDrawList* draw_list;
+  fmat4* sceneCo_to_clipCo;
+  fmat3* ndCo_to_imguiCo;
+
+  ImVec2 clipCo_to_imguiCo(const fvec4& p) {
+    fvec2 q = fvec2{p.x, p.y} / p.w;                 // NDCo (without depth)
+    return ImVec2{(*ndCo_to_imguiCo) * fvec3{q, 1}}; // imguiCo
+  }
+
+  void addLine(
+      const std::array<fvec3, 2>& ps,
+      const fvec4& color,
+      float thickness = 1.0f) {
+    auto cp0_cp1 = hit::clip4D_Line_ClipVolume({
+        (*sceneCo_to_clipCo) * fvec4{ps[0], 1},
+        (*sceneCo_to_clipCo) * fvec4{ps[1], 1}});
+    if (!cp0_cp1) { return; }
+
+    std::array<ImVec2, 2> ip0_ip1 = {
+        clipCo_to_imguiCo((*cp0_cp1)[0]),
+        clipCo_to_imguiCo((*cp0_cp1)[1])};
+    draw_list->AddLine(ip0_ip1[0], ip0_ip1[1], ImColor{ImVec4{color}}, thickness);
+  }
+
+  // TODO
+  void addPath(const vector<fvec3>& ps, const fvec4& color, float thickness = 1.0f, bool closed = false) {}
+
+  void addConvexFill(const vector<fvec3>& ps, const fvec4& color) {
+    vector<fvec4> qs{ps.size()};
+    for (auto i : Range{ps.size()}) {
+      qs[i] = (*sceneCo_to_clipCo) * fvec4{ps[i], 1};
+    }
+    vector<fvec4> cs = hit::clip4D_ConvexPoly_ClipVolume(qs);
+
+    draw_list->PathClear();
+    for (auto& c : cs) {
+      draw_list->PathLineTo(clipCo_to_imguiCo(c));
+    }
+    draw_list->PathFillConvex(ImColor{ImVec4{color}});
+  }
+};
 
 //
 // Camera view interaction (experiment)
@@ -281,9 +323,6 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
     auto p1 = glm::fmat3{1}[i] * (float)ctx.axis_bound;
     auto p2 = - p1;
 
-    auto w1 = project_3d(p1);
-    auto w2 = project_3d(p2);
-
     auto color = ig::GetColorU32({p1.x, p1.y, p1.z, .8});
     if (ctx.clip_line) {
       auto clip_p1_p2 = project_clip_line(p1, p2);
@@ -294,6 +333,8 @@ inline void CameraViewExperiment(CameraViewExperimentContext& ctx = global_camer
         draw->AddCircleFilled(_p1, 4.f, color); // positive end
       }
     } else {
+      auto w1 = project_3d(p1);
+      auto w2 = project_3d(p2);
       draw->AddLine(w1, w2, color, 1.f);
       draw->AddCircle(w2, 4.f, color);       // negative end
       draw->AddCircleFilled(w1, 4.f, color); // positive end

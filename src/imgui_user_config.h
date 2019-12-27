@@ -22,7 +22,7 @@
 // };                                                                      \
 
 //
-// Only for glm::fvec2 <==> ImVec2
+// Only for glm::fvec2/4 <==> ImVec2/4
 //
 
 #define IM_VEC2_CLASS_EXTRA                         \
@@ -34,4 +34,18 @@ ImVec2& operator=(const glm::fvec2& v) {            \
 }                                                   \
 inline glm::fvec2 glm() {                           \
   return {x, y};                                    \
+};                                                  \
+
+#define IM_VEC4_CLASS_EXTRA                         \
+ImVec4(const glm::fvec4& v)                         \
+  : x{v.x}, y{v.y}, z{v.z}, w{v.w} {}               \
+ImVec4& operator=(const glm::fvec4& v) {            \
+  x = v.x;                                          \
+  y = v.y;                                          \
+  z = v.z;                                          \
+  w = v.w;                                          \
+  return *this;                                     \
+}                                                   \
+inline glm::fvec4 glm() {                           \
+  return {x, y, z, w};                              \
 };                                                  \

@@ -72,6 +72,24 @@ struct Camera {
   glm::fmat4 getPerspectiveProjection() const {
     return glm::perspectiveRH_NO(yfov_, aspect_ratio_, znear_, zfar_);
   }
+
+  glm::fmat4 get_sceneCo_to_clipCo() const {
+    glm::fmat4 projection = getPerspectiveProjection();
+    glm::fmat4 sceneCo_to_clipCo = projection * utils::inverseTR(transform_);
+    return sceneCo_to_clipCo;
+  }
+
+  glm::fmat3x4 get_ndCo_to_sceneCo() const {
+    fmat4 projection = getPerspectiveProjection();
+    float sx = projection[0][0], sy = projection[1][1], n = 1; // TODO: n = camera_.znear_ is more useful?
+    glm::fmat3x4 ndCo_to_CameraCo = {
+      n/sx,    0,  0, 0,
+          0, n/sy,  0, 0,
+          0,    0, -n, 1,  // CameraCo at z = -n
+    };
+    glm::fmat3x4 ndCo_to_sceneCo = transform_ * ndCo_to_CameraCo;
+    return ndCo_to_sceneCo;
+  }
 };
 
 

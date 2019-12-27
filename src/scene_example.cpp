@@ -172,11 +172,18 @@ struct ViewportPanel : Panel {
     // refreshed on new frame
     ivec2 mouse_position_imgui;
     fvec3 mouse_position_scene;
-    fmat3 ndCo_to_imguiCo;           // 2d homog transform (here, ndCo without depth)
-    fmat3 imguiCo_to_ndCo;
+
+    // sceneCo -> cameraCo -> clipCo -> ndCo -> imguiCo
     fmat4 sceneCo_to_clipCo;
-    glm::fmat3x4 ndCo_to_sceneCo;    // injection to SceneCo as CameraCo at z = -1
+    fmat3 ndCo_to_imguiCo;           // 2d homog transform (here, ndCo without depth)
+
+    // sceneCo <- cameraCo <- clipCo <- ndCo <- imguiCo
+    fmat3 imguiCo_to_ndCo;
+    glm::fmat3x4 ndCo_to_sceneCo;    // injection to SceneCo as CameraCo at z = -1 (TODO: z = -near is more useful?)
     glm::fmat3x4 imguiCo_to_sceneCo; // ndCo_to_sceneCo * imguiCo_to_ndCo
+
+    // convinience
+    imgui::DrawList3D imgui3d;
 
     // some shortcut
     fvec3 camera_position;
@@ -184,10 +191,14 @@ struct ViewportPanel : Panel {
 
     // UI state
     fvec3 pivot = {0, 0, 0};
+    bool grid[3] = {0, 1, 0};
+    bool axis[3] = {1, 1, 1};
+    int axis_bound = 10;
+    int grid_division = 3;
 
     // debug
     bool overlay = true;
-    bool debug_sceneCo_imguiCo = true;
+    bool debug_sceneCo_imguiCo = false;
     bool debug_ray_test = true;
   } ctx_;
 
@@ -196,49 +207,33 @@ struct ViewportPanel : Panel {
     camera_.transform_[3] = fvec4{0, 0, 4, 1};
   }
 
-  ivec2 convert_sceneCo_to_imguiCo(fvec3 p1) {
-    fvec4 p2 = ctx_.sceneCo_to_clipCo * fvec4{p1, 1};  // ClipCo
-    fvec2 p3 = fvec2{p2.x, p2.y} / p2.w;               // NDCo (without depth)
-    return ivec2{ctx_.ndCo_to_imguiCo * fvec3{p3, 1}};
+  ImVec2 convert_clipCo_to_imguiCo(const fvec4& p) {
+    fvec2 q = fvec2{p.x, p.y} / p.w;                   // NDCo (without depth)
+    return ImVec2{ctx_.ndCo_to_imguiCo * fvec3{q, 1}}; // imguiCo
   }
 
-  fvec3 convert_imguiCo_to_sceneCo(ivec2 q1) {
+  ImVec2 convert_sceneCo_to_imguiCo(const fvec3& p1) {
+    fvec4 p2 = ctx_.sceneCo_to_clipCo * fvec4{p1, 1};  // ClipCo
+    return convert_clipCo_to_imguiCo(p2);
+  }
+
+  fvec3 convert_imguiCo_to_sceneCo(const ivec2& q1) {
     return ctx_.imguiCo_to_sceneCo * fvec3{q1, 1};
   }
 
-  void _setupContext() {
-    // TODO: move this computation to utils or utils_imgui
-    {
-      fmat4 projection = camera_.getPerspectiveProjection();
-      ctx_.sceneCo_to_clipCo = projection * inverseTR(camera_.transform_);
-
-      float sx = projection[0][0], sy = projection[1][1], n = 1; // TODO: n = camera_.znear_ is more useful?
-      glm::fmat3x4 ndCo_to_CameraCo = {
-        n/sx,    0,  0, 0,
-           0, n/sy,  0, 0,
-           0,    0, -n, 1,  // CameraCo at z = -1
-      };
-      ctx_.ndCo_to_sceneCo = camera_.transform_ * ndCo_to_CameraCo;
-    }
-    {
-      float L = content_offset_.x;
-      float T = content_offset_.y;
-      float W = content_size_.x;
-      float H = content_size_.y;
-      // Derived via (T: translation, S: scale)
-      // T(L, T) * S(W, H) * S(1/2, 1/2) * T(1/2, 1/2) * S(1, -1)
-      ctx_.ndCo_to_imguiCo = {
-            W/2,          0,    0,
-              0,       -H/2,    0,
-        L + W/2,    T + H/2,    1,
-      };
-      ctx_.imguiCo_to_ndCo = glm::inverse(ctx_.ndCo_to_imguiCo);
-    }
+  void setupContext() {
+    ctx_.sceneCo_to_clipCo = camera_.get_sceneCo_to_clipCo();
+    ctx_.ndCo_to_sceneCo = camera_.get_ndCo_to_sceneCo();
+    ctx_.ndCo_to_imguiCo = get_ndCo_to_windowCo(content_offset_, content_size_);
+    ctx_.imguiCo_to_ndCo = glm::inverse(ctx_.ndCo_to_imguiCo);
     ctx_.imguiCo_to_sceneCo = ctx_.ndCo_to_sceneCo * ctx_.imguiCo_to_ndCo;
+
     ctx_.mouse_position_imgui = ImGui::GetMousePos().glm();
     ctx_.mouse_position_scene = convert_imguiCo_to_sceneCo(ctx_.mouse_position_imgui);
     ctx_.camera_position = fvec3{camera_.transform_[3]};
     ctx_.mouse_direction = ctx_.mouse_position_scene - ctx_.camera_position;
+
+    ctx_.imgui3d = {draw_list_, &ctx_.sceneCo_to_clipCo, &ctx_.ndCo_to_imguiCo};
   }
 
   void processMenu() override {
@@ -282,7 +277,7 @@ struct ViewportPanel : Panel {
         ImGui::InputFloat3("mouse (scene)", (float*)&ctx_.mouse_position_scene, 2, ImGuiInputTextFlags_ReadOnly);
       }
       if (ImGui::CollapsingHeader("Debug", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ivec2 v = convert_sceneCo_to_imguiCo(ctx_.mouse_position_scene);
+        ivec2 v = convert_sceneCo_to_imguiCo(ctx_.mouse_position_scene).glm();
         ImGui::Text("mouse (imgui -> scene -> imgui)");
         ImGui::InputInt2("###sceneCo_to_imguiCo", (int*)&v, ImGuiInputTextFlags_ReadOnly);
 
@@ -292,7 +287,66 @@ struct ViewportPanel : Panel {
     }
   }
 
+  void UI_Axes() {
+    int B = ctx_.axis_bound;
+    for (auto i : Range{3}) {
+      if (!ctx_.axis[i]) { continue; }
+
+      fvec3 p = glm::fmat3{1}[i];
+      fvec3 p1 = p * (float)B;
+      fvec3 p2 = - p1;
+      ctx_.imgui3d.addLine({p1, p2}, fvec4{p, .4f});
+    }
+  }
+
+  void UI_GridPlanes() {
+    // TODO: Move grid generation to utils
+    int B = ctx_.axis_bound;
+    int D = ctx_.grid_division;
+    for (auto i : Range{3}) {
+      if (!ctx_.grid[i]) { continue; }
+
+      auto j = (i + 1) % 3;                        // e.g. i = 0, j = 1, k = 2
+      auto k = (i + 2) % 3;
+      fvec3 v{0}; v[k] = B;                        // e.g. {0, 0, B}
+      for (auto s : Range{-B, B + 1}) {
+        fvec3 u{0}; u[j] = s;                      // e.g. {0, s, 0}
+        fvec3 p1 = u + v;                          // e.g. {0, s, B}
+        fvec3 p2 = u - v;                          // e.g. {0, s,-B}
+        fvec3 q1{0}; q1[j] = p1[k]; q1[k] = p1[j]; // e.g. {0, B, s}
+        fvec3 q2{0}; q2[j] = p2[k]; q2[k] = p2[j]; // e.g. {0,-B, s}
+        //
+        // e.g.
+        //               p1 (s, B)
+        //         |----------|----|
+        //    q2   |          |    |   q1
+        // (-B, s) |----------|----| (B, s)
+        //         |          |    |          z
+        //         |          |    |          |
+        //         |----------|--- |          +-- y
+        //               p2 (s,-B)
+        //
+
+        // integer grid
+        ctx_.imgui3d.addLine({p1, p2}, {1, 1, 1, .3});
+        ctx_.imgui3d.addLine({q1, q2}, {1, 1, 1, .3});
+
+        // fractional grid
+        if (s == B) { continue; }
+        for (auto l : Range{1, D}) {
+          auto f = (float)l / D;
+          fvec3 g{0}; g[j] = f;
+          fvec3 h{0}; h[k] = f;
+          ctx_.imgui3d.addLine({p1 + g, p2 + g}, {1, 1, 1, .15});
+          ctx_.imgui3d.addLine({q1 + h, q2 + h}, {1, 1, 1, .15});
+        }
+      }
+    }
+  }
+
   void UI_Gizmo() {
+    UI_GridPlanes();
+    UI_Axes();
     if (ImGui::IsMouseDown(0)) {
       fvec2 delta = ImGui::GetIO().MouseDelta.glm() / fvec2{framebuffer_->size_};
       if (ImGui::GetIO().KeyCtrl) {
@@ -307,16 +361,10 @@ struct ViewportPanel : Panel {
     }
     if (ctx_.debug_ray_test && ImGui::IsMouseDown(0)) {
       auto result = mng_.rayTest(ctx_.camera_position, ctx_.mouse_direction);
-      draw_list_->AddCircleFilled(
-          ImVec2{convert_sceneCo_to_imguiCo(ctx_.mouse_position_scene)}, 4.0f,
-          result.hit ? IM_COL32(255, 255, 0, 255) : IM_COL32(255, 255, 255, 255));
-
       if (result.hit) {
-        draw_list_->PathClear();
-        for (auto i : Range{3}) {
-          draw_list_->PathLineTo(ImVec2{convert_sceneCo_to_imguiCo(result.face[i])});
-        }
-        draw_list_->PathFillConvex(ImGui::GetColorU32({1, 0, 1, .8}));
+        // Reverse order since ImGui PathFillConvex's AA is applied for CW face.
+        vector<fvec3> ps = {result.face[2], result.face[1], result.face[0]};
+        ctx_.imgui3d.addConvexFill(ps, {1, 0, 1, 1});
       }
     }
     if (ctx_.debug_sceneCo_imguiCo) {
@@ -326,14 +374,14 @@ struct ViewportPanel : Panel {
       fvec3 x = glm::normalize(glm::cross(fvec3{0, 1, 0}, z));;
       fvec3 y = glm::normalize(glm::cross(z, x));
 
-      auto _o = ImVec2{convert_sceneCo_to_imguiCo(o / 2.0f)};
-      auto _x = ImVec2{convert_sceneCo_to_imguiCo(x / 2.0f)};
-      auto _y = ImVec2{convert_sceneCo_to_imguiCo(y / 2.0f)};
-      auto _z = ImVec2{convert_sceneCo_to_imguiCo(z / 2.0f)};
-      ImU32 w = ImGui::GetColorU32({1, 1, 1, 0.6f});
-      ImU32 r = ImGui::GetColorU32({1, 0, 0, 0.6f});
-      ImU32 g = ImGui::GetColorU32({0, 1, 0, 0.6f});
-      ImU32 b = ImGui::GetColorU32({0, 0, 1, 0.6f});
+      ImVec2 _o = convert_sceneCo_to_imguiCo(o / 2.0f);
+      ImVec2 _x = convert_sceneCo_to_imguiCo(x / 2.0f);
+      ImVec2 _y = convert_sceneCo_to_imguiCo(y / 2.0f);
+      ImVec2 _z = convert_sceneCo_to_imguiCo(z / 2.0f);
+      ImColor w = {1.f, 1.f, 1.f, 0.6f};
+      ImColor r = {1.f, 0.f, 0.f, 0.6f};
+      ImColor g = {0.f, 1.f, 0.f, 0.6f};
+      ImColor b = {0.f, 0.f, 1.f, 0.6f};
 
       draw_list_->AddLine(_o, _x, r);
       draw_list_->AddLine(_o, _y, g);
@@ -350,7 +398,7 @@ struct ViewportPanel : Panel {
     camera_.aspect_ratio_ = (float)content_size_[0] / content_size_[1];
     framebuffer_->setSize({content_size_[0], content_size_[1]});
     draw_list_ = ImGui::GetWindowDrawList();
-    _setupContext();
+    setupContext();
 
     // Draw UI
     draw_list_->ChannelsSplit(DrawChannel::CHANNELS_COUNT);

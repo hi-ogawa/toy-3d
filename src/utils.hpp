@@ -600,6 +600,20 @@ inline void pivotControl(
   }
 }
 
+inline fmat3 get_ndCo_to_windowCo(const fvec2& offset, const fvec2& size) {
+  // Derived via (T: translation, S: scale)
+  // T(L, T) * S(W, H) * S(1/2, 1/2) * T(1/2, 1/2) * S(1, -1)
+  float L = offset.x;
+  float T = offset.y;
+  float W = size.x;
+  float H = size.y;
+  return {
+        W/2,          0,    0,
+          0,       -H/2,    0,
+    L + W/2,    T + H/2,    1,
+  };
+}
+
 //
 // Mesh examples
 //
