@@ -555,6 +555,14 @@ inline fmat4 lookatTransform(fvec3 src, fvec3 dest, fvec3 up) {
   };
 }
 
+inline fvec3 getNonParallel(fvec3 v1) {
+  auto is_small = [](const fvec3& u) {
+    return glm::abs(glm::length(u)) < glm::epsilon<float>(); };
+  fvec3 v2 = {1, 0, 0};
+  fvec3 v3 = {0, 1, 0};
+  return is_small(glm::cross(v1, v2)) ? v3 : v2;
+}
+
 // Extracted from imgui::CameraViewExperiment
 enum struct PivotControlType { ROTATION, ZOOM, MOVE };
 inline void pivotControl(

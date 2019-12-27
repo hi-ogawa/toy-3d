@@ -62,8 +62,9 @@ inline bool InputTransform(
 
 struct DrawList3D {
   ImDrawList* draw_list;
-  fmat4* sceneCo_to_clipCo;
-  fmat3* ndCo_to_imguiCo;
+  const fvec3* camera_position;
+  const fmat4* sceneCo_to_clipCo;
+  const fmat3* ndCo_to_imguiCo;
 
   ImVec2 clipCo_to_imguiCo(const fvec4& p) {
     fvec2 q = fvec2{p.x, p.y} / p.w;                 // NDCo (without depth)
@@ -85,8 +86,15 @@ struct DrawList3D {
     draw_list->AddLine(ip0_ip1[0], ip0_ip1[1], ImColor{ImVec4{color}}, thickness);
   }
 
-  // TODO
-  void addPath(const vector<fvec3>& ps, const fvec4& color, float thickness = 1.0f, bool closed = false) {}
+  void addPath(const vector<fvec3>& ps, const fvec4& color, float thickness = 1.0f, bool closed = false) {
+    size_t N = ps.size();
+    for (auto i : Range{N - 1}) {
+      addLine({ps[i], ps[i + 1]}, color, thickness);
+    }
+    if (closed) {
+      addLine({ps[N - 1], ps[0]}, color, thickness);
+    }
+  }
 
   void addConvexFill(const vector<fvec3>& ps, const fvec4& color) {
     vector<fvec4> qs{ps.size()};
@@ -94,12 +102,68 @@ struct DrawList3D {
       qs[i] = (*sceneCo_to_clipCo) * fvec4{ps[i], 1};
     }
     vector<fvec4> cs = hit::clip4D_ConvexPoly_ClipVolume(qs);
+    if (cs.size() < 3) { return; }
+
+    // Fix orientation for PathFillConvex's AA
+    bool flip; {
+      ImVec2 v1 = clipCo_to_imguiCo(cs[1] - cs[0]);
+      ImVec2 v2 = clipCo_to_imguiCo(cs[2] - cs[0]);
+      flip = v1.x * v2. y - v1.y * v2.x < 0;
+    }
 
     draw_list->PathClear();
-    for (auto& c : cs) {
-      draw_list->PathLineTo(clipCo_to_imguiCo(c));
+    if (flip) {
+      for (auto& c : Reverse{cs})
+        draw_list->PathLineTo(clipCo_to_imguiCo(c));
+    } else {
+      for (auto& c : cs)
+        draw_list->PathLineTo(clipCo_to_imguiCo(c));
     }
     draw_list->PathFillConvex(ImColor{ImVec4{color}});
+  }
+
+  vector<fvec3> _makeCirclePoints(
+      const fvec3& center, float radius, const fvec3& axis, int num_segments) {
+    float pi = glm::pi<float>();
+    fmat4 xform = lookatTransform({0, 0, 0}, axis, getNonParallel(axis));
+    fvec3 u = fvec3{xform[0]};
+    fvec3 v = fvec3{xform[1]};
+
+    vector<fvec3> ps{(size_t)num_segments};
+    for (auto i : Range{num_segments}) {
+      using std::cos, std::sin;
+      float t = 2 * pi * i / num_segments;
+      auto& c = center;
+      auto& r = radius;
+      ps[i] = c + r * cos(t) * u + r * sin(t) * v;
+    }
+    return ps;
+  }
+
+  void addCircle(
+      const fvec3& center, float radius, const fvec3& axis,
+      const fvec4& color, float thickness = 1.0f, int num_segments = 48) {
+    addPath(_makeCirclePoints(center, radius, axis, num_segments), color, thickness, /*closed*/ true);
+  }
+
+  void addCircleFill(
+      const fvec3& center, float radius, const fvec3& axis,
+      const fvec4& color, int num_segments = 48) {
+    addConvexFill(_makeCirclePoints(center, radius, axis, num_segments), color);
+  }
+
+  void addSphere(const fvec3& center, float radius, const fvec4& color) {
+    using std::cos, std::sin, std::asin, glm::length;
+    float pi = glm::pi<float>();
+
+    // Find tangental cone's base circle
+    fvec3 camera_to_center = center - (*camera_position);
+    float l = length(camera_to_center);
+    float cone_half_angle = asin(radius / l);
+    float cone_base_radius = cos(cone_half_angle) * radius;
+    fvec3 cone_base_center = (*camera_position) + camera_to_center * cos(cone_half_angle) * cos(cone_half_angle);
+
+    addCircleFill(cone_base_center, cone_base_radius, camera_to_center, color);
   }
 };
 

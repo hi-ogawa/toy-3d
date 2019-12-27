@@ -191,6 +191,7 @@ struct ViewportPanel : Panel {
 
     // UI state
     fvec3 pivot = {0, 0, 0};
+    fmat4 gizmo_xform = fmat4{1};
     bool grid[3] = {0, 1, 0};
     bool axis[3] = {1, 1, 1};
     int axis_bound = 10;
@@ -200,6 +201,7 @@ struct ViewportPanel : Panel {
     bool overlay = true;
     bool debug_sceneCo_imguiCo = false;
     bool debug_ray_test = true;
+    bool debug_gizmo_rotation = true;
   } ctx_;
 
   ViewportPanel(const SceneManager& mng) : mng_{mng} {
@@ -233,7 +235,7 @@ struct ViewportPanel : Panel {
     ctx_.camera_position = fvec3{camera_.transform_[3]};
     ctx_.mouse_direction = ctx_.mouse_position_scene - ctx_.camera_position;
 
-    ctx_.imgui3d = {draw_list_, &ctx_.sceneCo_to_clipCo, &ctx_.ndCo_to_imguiCo};
+    ctx_.imgui3d = {draw_list_, &ctx_.camera_position, &ctx_.sceneCo_to_clipCo, &ctx_.ndCo_to_imguiCo};
   }
 
   void processMenu() override {
@@ -347,6 +349,20 @@ struct ViewportPanel : Panel {
   void UI_Gizmo() {
     UI_GridPlanes();
     UI_Axes();
+
+    if (ctx_.debug_gizmo_rotation) {
+      fvec3 center = fvec3{ctx_.gizmo_xform[3]};
+      ctx_.imgui3d.addSphere(center, 1, {1, 1, 1, .4});
+      ctx_.imgui3d.addCircle(center, 1, {1, 0, 0}, {1, 0, 0, .4}, 2);
+      ctx_.imgui3d.addCircle(center, 1, {0, 1, 0}, {0, 1, 0, .4}, 2);
+      ctx_.imgui3d.addCircle(center, 1, {0, 0, 1}, {0, 0, 1, .4}, 2);
+
+      ctx_.imgui3d.addSphere({3, 3, 1}, 1, {1, 1, 1, .4});
+      ctx_.imgui3d.addCircle({3, 3, 1}, 1, {1, 0, 0}, {1, 0, 0, .4}, 2);
+      ctx_.imgui3d.addCircle({3, 3, 1}, 1, {0, 1, 0}, {0, 1, 0, .4}, 2);
+      ctx_.imgui3d.addCircle({3, 3, 1}, 1, {0, 0, 1}, {0, 0, 1, .4}, 2);
+    }
+
     if (ImGui::IsMouseDown(0)) {
       fvec2 delta = ImGui::GetIO().MouseDelta.glm() / fvec2{framebuffer_->size_};
       if (ImGui::GetIO().KeyCtrl) {
@@ -359,14 +375,15 @@ struct ViewportPanel : Panel {
         pivotControl(camera_.transform_, ctx_.pivot, delta * 4.f, PivotControlType::MOVE);
       }
     }
+
     if (ctx_.debug_ray_test && ImGui::IsMouseDown(0)) {
       auto result = mng_.rayTest(ctx_.camera_position, ctx_.mouse_direction);
       if (result.hit) {
-        // Reverse order since ImGui PathFillConvex's AA is applied for CW face.
-        vector<fvec3> ps = {result.face[2], result.face[1], result.face[0]};
+        vector<fvec3> ps = {result.face[0], result.face[1], result.face[2]};
         ctx_.imgui3d.addConvexFill(ps, {1, 0, 1, 1});
       }
     }
+
     if (ctx_.debug_sceneCo_imguiCo) {
       // Demo for sceneCo <-> imguiCo convertion
       fvec3 o = {0, 0, 0};
