@@ -95,7 +95,7 @@ namespace toy { namespace utils {
 
 namespace {
 using glm::ivec2, glm::fvec2, glm::fvec3, glm::fvec4, glm::fmat3, glm::fmat4;
-using std::vector, std::string;
+using std::vector, std::string, std::array;
 }
 
 template <typename T>
@@ -175,12 +175,18 @@ struct Enumerate {
   Iterator end() { return Iterator{end_, data}; };
 };
 
+template<glm::length_t N>
+inline bool isSmall(glm::vec<N, float> v) {
+  return glm::length(v) < glm::epsilon<float>();
+}
+
+inline bool isSmall(float a) {
+  return std::abs(a) < glm::epsilon<float>();
+}
 
 // Primitive closest point (cf. closed convex projection theorem)
 
 namespace hit {
-
-inline auto _isSmall(float f) { return glm::abs(f) < glm::epsilon<float>(); }
 
 inline auto Line_Plane(
     const fvec3& p, // line point
@@ -192,7 +198,7 @@ inline auto Line_Plane(
   // <(p + t v) - q, n> = 0  <=>  t <v, n> = <q - p, n>
   auto a = glm::dot(v, n);
   auto b = glm::dot(q - p, n);
-  if (_isSmall(a)) { return {}; }
+  if (isSmall(a)) { return {}; }
   return b / a;
 }
 
@@ -204,7 +210,7 @@ inline auto Line_Point(
 {
   // <(p + t v) - q, v> = 0  <=>  t <v, v> = <q - p, v>
   auto a = glm::dot(v, v);
-  TOY_ASSERT(!_isSmall(a));
+  TOY_ASSERT(!isSmall(a));
   auto b = glm::dot(q - p, v);
   return b / a;
 }
@@ -228,6 +234,20 @@ inline auto Line_Sphere(
   return std::make_pair(t - dt, t + dt);
 }
 
+inline float Line_Line(           // @return t s.t. p + t u is 1st line's closest point to 2nd line
+  const fvec3& p, const fvec3& u, // 1st line
+  const fvec3& q, const fvec3& v  // 2nd line
+) {
+  using glm::cross;
+  fvec3 s = cross(u, v);
+  if (isSmall(s)) {
+    return Line_Point(p, u, q);
+  }
+  std::optional<float> t = *Line_Plane(p, u, q, cross(s, v));
+  TOY_ASSERT(t);
+  return *t;
+}
+
 struct RayTriangleResult {
   bool valid = false; // "hit" is determined by uv \in 2-standard-simplex (i.e. u + v <= 1 and u, v >= 0)
   float t;            // always t >= 0
@@ -246,7 +266,7 @@ inline RayTriangleResult Ray_Triangle(
   fvec3 n = cross(v1, v2);
 
   // degenerate triangle
-  if (_isSmall(glm::length(n))) { return result; }
+  if (isSmall(glm::length(n))) { return result; }
 
   std::optional<float> t = Line_Plane(src, dir, p0, n);
 
@@ -606,6 +626,93 @@ inline void pivotControl(
       break;
     }
   }
+}
+
+inline float gizmoControl_Rotation(
+    const fvec3& mouse, const fvec3& mouse_last, const fvec3& camera,
+    const fvec3& origin, const fvec3 axis) {
+  auto& p      = mouse;
+  auto& p_last = mouse_last;
+  auto& q      = camera;
+  std::optional<float> t      = hit::Line_Plane(q, p      - q, origin, axis);
+  std::optional<float> t_last = hit::Line_Plane(q, p_last - q, origin, axis);
+  if (!(t && t_last)) { return 0; }
+
+  fvec3 v      = q + (*t)      * (p      - q) - origin;
+  fvec3 v_last = q + (*t_last) * (p_last - q) - origin;
+  if (isSmall(v) || isSmall(v_last)) { return 0; }
+
+  using glm::normalize, glm::cross, glm::dot;
+  fvec3 x = normalize(v_last);
+  fvec3 y = normalize(cross(axis, v_last));
+  float angle_delta = atan2(dot(y, v), dot(x, v));
+  return angle_delta;
+}
+
+inline float gizmoControl_Translation1D(
+    const fvec3& mouse, const fvec3& mouse_last, const fvec3& camera,
+    const fvec3& origin, const fvec3 axis) {
+  auto& p      = mouse;
+  auto& p_last = mouse_last;
+  auto& q      = camera;
+
+  // NOTE: this projection doesn't seems useful but this is only canonical choice...
+  float t      = hit::Line_Line(q, p      - q, origin, axis);
+  float t_last = hit::Line_Line(q, p_last - q, origin, axis);
+
+  fvec3 v = t * (p - q) - t_last * (p_last - q);
+  return glm::dot(v, axis);
+}
+
+// Probably, this is less convinient than below definition.
+// (float, float) delta is necessary, for example, for "stepped" constraint.
+inline fvec3 gizmoControl_Translation2D(
+    const fvec3& mouse, const fvec3& mouse_last, const fvec3& camera,
+    const fvec3& origin, const fvec3& normal) {
+  auto& p      = mouse;
+  auto& p_last = mouse_last;
+  auto& q      = camera;
+  std::optional<float> t      = hit::Line_Plane(q, p      - q, origin, normal);
+  std::optional<float> t_last = hit::Line_Plane(q, p_last - q, origin, normal);
+  if (!(t && t_last)) { return fvec3{0}; }
+
+  fvec3 v = (*t) * (p - q) - (*t_last) * (p_last - q);
+  return v - glm::dot(normal, v) * normal;
+}
+
+inline array<float, 2> gizmoControl_Translation2D(
+    const fvec3& mouse, const fvec3& mouse_last, const fvec3& camera,
+    const fvec3& origin, const fvec3& u1, const fvec3& u2) {
+  auto& p      = mouse;
+  auto& p_last = mouse_last;
+  auto& q      = camera;
+  fvec3 normal = glm::cross(u1, u2);
+  TOY_ASSERT(!isSmall(normal));
+  std::optional<float> t      = hit::Line_Plane(q, p      - q, origin, normal);
+  std::optional<float> t_last = hit::Line_Plane(q, p_last - q, origin, normal);
+  if (!(t && t_last)) { return {0, 0}; }
+
+  using glm::fmat2x3, glm::inverse, glm::transpose;
+  fmat2x3 F = {u1, u2};
+  fvec3 v = (*t) * (p - q) - (*t_last) * (p_last - q);
+  fvec2 st = inverse(transpose(F) * F) * transpose(F) * v;
+  return {st[0], st[1]};
+}
+
+inline float gizmoControl_Scale3D(
+    const fvec3& mouse, const fvec3& mouse_last, const fvec3& camera,
+    const fvec3& origin) {
+  auto& p      = mouse;
+  auto& p_last = mouse_last;
+  auto& q      = camera;
+  fvec3 normal = origin - camera;
+  std::optional<float> t      = hit::Line_Plane(q, p      - q, origin, normal);
+  std::optional<float> t_last = hit::Line_Plane(q, p_last - q, origin, normal);
+  if (!(t && t_last)) { return 0; }
+
+  fvec3 v      = q + (*t)      * (p      - q) - origin;
+  fvec3 v_last = q + (*t_last) * (p_last - q) - origin;
+  return glm::length(v) / glm::length(v_last);
 }
 
 inline fmat3 get_ndCo_to_windowCo(const fvec2& offset, const fvec2& size) {

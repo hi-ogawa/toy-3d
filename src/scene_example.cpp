@@ -171,7 +171,9 @@ struct ViewportPanel : Panel {
   struct UIContext {
     // refreshed on new frame
     ivec2 mouse_position_imgui;
+    ivec2 mouse_position_imgui_delta;
     fvec3 mouse_position_scene;
+    fvec3 mouse_position_scene_last;
 
     // sceneCo -> cameraCo -> clipCo -> ndCo -> imguiCo
     fmat4 sceneCo_to_clipCo;
@@ -201,7 +203,7 @@ struct ViewportPanel : Panel {
     bool overlay = true;
     bool debug_sceneCo_imguiCo = false;
     bool debug_ray_test = true;
-    bool debug_gizmo_rotation = true;
+    bool debug_gizmo = true;
   } ctx_;
 
   ViewportPanel(const SceneManager& mng) : mng_{mng} {
@@ -231,7 +233,9 @@ struct ViewportPanel : Panel {
     ctx_.imguiCo_to_sceneCo = ctx_.ndCo_to_sceneCo * ctx_.imguiCo_to_ndCo;
 
     ctx_.mouse_position_imgui = ImGui::GetMousePos().glm();
+    ctx_.mouse_position_imgui_delta = ImGui::GetIO().MouseDelta.glm();
     ctx_.mouse_position_scene = convert_imguiCo_to_sceneCo(ctx_.mouse_position_imgui);
+    ctx_.mouse_position_scene_last = convert_imguiCo_to_sceneCo(ctx_.mouse_position_imgui - ctx_.mouse_position_imgui_delta);
     ctx_.camera_position = fvec3{camera_.transform_[3]};
     ctx_.mouse_direction = ctx_.mouse_position_scene - ctx_.camera_position;
 
@@ -350,20 +354,54 @@ struct ViewportPanel : Panel {
     UI_GridPlanes();
     UI_Axes();
 
-    if (ctx_.debug_gizmo_rotation) {
-      fvec3 center = fvec3{ctx_.gizmo_xform[3]};
-      ctx_.imgui3d.addSphere(center, 1, {1, 1, 1, .4});
-      ctx_.imgui3d.addCircle(center, 1, {1, 0, 0}, {1, 0, 0, .4}, 2);
-      ctx_.imgui3d.addCircle(center, 1, {0, 1, 0}, {0, 1, 0, .4}, 2);
-      ctx_.imgui3d.addCircle(center, 1, {0, 0, 1}, {0, 0, 1, .4}, 2);
+    if (ctx_.debug_gizmo) {
+      auto [xform_s, xform_r, xform_t] = decomposeTransform(ctx_.gizmo_xform);
+      {
+        fmat3 so3 = ExtrinsicEulerXYZ_to_SO3(xform_r);
+        ctx_.imgui3d.addSphere(xform_t, xform_s[0], {1, 1, 1, .4});
+        ctx_.imgui3d.addCircle(xform_t, xform_s[0], so3[0], {1, 0, 0, .4}, 2);
+        ctx_.imgui3d.addCircle(xform_t, xform_s[1], so3[1], {0, 1, 0, .4}, 2);
+        ctx_.imgui3d.addCircle(xform_t, xform_s[2], so3[2], {0, 0, 1, .4}, 2);
 
-      ctx_.imgui3d.addSphere({3, 3, 1}, 1, {1, 1, 1, .4});
-      ctx_.imgui3d.addCircle({3, 3, 1}, 1, {1, 0, 0}, {1, 0, 0, .4}, 2);
-      ctx_.imgui3d.addCircle({3, 3, 1}, 1, {0, 1, 0}, {0, 1, 0, .4}, 2);
-      ctx_.imgui3d.addCircle({3, 3, 1}, 1, {0, 0, 1}, {0, 0, 1, .4}, 2);
+      }
+      draw_list_->AddCircleFilled(convert_sceneCo_to_imguiCo(xform_t), 3, ImColor{1.f, 0.f, 1.f, 0.8f});
+
+      if (ImGui::IsMouseDown(0)) {
+        if (ImGui::GetIO().KeyCtrl) {
+          fvec3 axis = {0, 0, 1};
+          float delta = gizmoControl_Rotation(
+              ctx_.mouse_position_scene, ctx_.mouse_position_scene_last,
+              ctx_.camera_position, xform_t, axis);
+          xform_r += delta * axis;
+        }
+        if (ImGui::GetIO().KeyShift) {
+          {
+            fvec3 axis = {1, 0, 0};
+            float delta = gizmoControl_Translation1D(
+                ctx_.mouse_position_scene, ctx_.mouse_position_scene_last,
+                ctx_.camera_position, xform_t, axis);
+            // xform_t += delta * axis;
+          }
+          {
+            fvec3 u1 = {1, 0, 0};
+            fvec3 u2 = {0, 1, 0};
+            array<float, 2> delta = gizmoControl_Translation2D(
+                ctx_.mouse_position_scene, ctx_.mouse_position_scene_last,
+                ctx_.camera_position, xform_t, u1, u2);
+            xform_t += delta[0] * u1 + delta[1] * u2;
+          }
+        }
+        if (ImGui::GetIO().KeyAlt) {
+          float delta_ratio = gizmoControl_Scale3D(
+              ctx_.mouse_position_scene, ctx_.mouse_position_scene_last,
+              ctx_.camera_position, xform_t);
+          xform_s *= delta_ratio;
+        }
+      }
+      ctx_.gizmo_xform = composeTransform(xform_s, xform_r, xform_t);
     }
 
-    if (ImGui::IsMouseDown(0)) {
+    if (ImGui::IsMouseDown(1)) {
       fvec2 delta = ImGui::GetIO().MouseDelta.glm() / fvec2{framebuffer_->size_};
       if (ImGui::GetIO().KeyCtrl) {
         pivotControl(camera_.transform_, ctx_.pivot, delta * fvec2{2 * 3.14, 3.14}, PivotControlType::ROTATION);

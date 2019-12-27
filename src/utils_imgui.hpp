@@ -86,13 +86,24 @@ struct DrawList3D {
     draw_list->AddLine(ip0_ip1[0], ip0_ip1[1], ImColor{ImVec4{color}}, thickness);
   }
 
+  // NOTE: not used
+  vector<array<fvec4, 2>> _clipPathPoints(const vector<fvec3>& ps, bool closed = false) {
+    size_t N = ps.size();
+    vector<array<fvec4, 2>> lines;
+    for (auto i : Range{closed ? N : N - 1}) {
+      auto cp0_cp1 = hit::clip4D_Line_ClipVolume({
+          (*sceneCo_to_clipCo) * fvec4{ps[i],           1},
+          (*sceneCo_to_clipCo) * fvec4{ps[(i + 1) % N], 1}});
+      if (!cp0_cp1) { continue; }
+      lines.push_back(*cp0_cp1);
+    }
+    return lines;
+  }
+
   void addPath(const vector<fvec3>& ps, const fvec4& color, float thickness = 1.0f, bool closed = false) {
     size_t N = ps.size();
-    for (auto i : Range{N - 1}) {
-      addLine({ps[i], ps[i + 1]}, color, thickness);
-    }
-    if (closed) {
-      addLine({ps[N - 1], ps[0]}, color, thickness);
+    for (auto i : Range{closed ? N : N - 1}) {
+      addLine({ps[i], ps[(i + 1) % N]}, color, thickness);
     }
   }
 
