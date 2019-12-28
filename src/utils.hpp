@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include <optional>
 #include <map>
@@ -107,18 +108,16 @@ struct Reverse {
   auto end()   { return std::rend(iterable_);   };
 };
 
+template <typename T>
 struct Range {
-  int start_, end_;
-  Range(int start, int end) : start_{start}, end_{std::max(start, end)} {}
-  Range(int end) : Range(0, end) {}
-  // TODO: remove this
-  Range(size_t start, size_t end) : start_{static_cast<int>(start)}, end_{static_cast<int>(std::max(start, end))} {}
-  Range(size_t end) : start_{0}, end_{static_cast<int>(end)} {}
+  T start_, end_;
+  Range(T start, T end) : start_{start}, end_{std::max(start, end)} {}
+  Range(T end) : Range(0, end) {}
 
   struct Iterator {
-    int i_;
+    T i_;
 
-    int operator*() { return i_; }
+    T operator*() { return i_; }
     Iterator& operator++() {
       i_++;
       return *this;
@@ -128,9 +127,9 @@ struct Range {
     }
   };
   struct ReverseIterator {
-    int i_;
+    T i_;
 
-    int operator*() { return i_; }
+    T operator*() { return i_; }
     ReverseIterator& operator++() {
       i_--;
       return *this;
