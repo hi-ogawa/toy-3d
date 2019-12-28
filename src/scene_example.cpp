@@ -298,7 +298,7 @@ struct ViewportPanel : Panel {
     for (auto i : Range{3}) {
       if (!ctx_.axis[i]) { continue; }
 
-      fvec3 p = glm::fmat3{1}[i];
+      fvec3 p{0}; p[i] = 1;
       fvec3 p1 = p * (float)B;
       fvec3 p2 = - p1;
       ctx_.imgui3d.addLine({p1, p2}, fvec4{p, .4f});
@@ -306,45 +306,33 @@ struct ViewportPanel : Panel {
   }
 
   void UI_GridPlanes() {
-    // TODO: Move grid generation to utils
     int B = ctx_.axis_bound;
     int D = ctx_.grid_division;
+
     for (auto i : Range{3}) {
       if (!ctx_.grid[i]) { continue; }
-
-      auto j = (i + 1) % 3;                        // e.g. i = 0, j = 1, k = 2
+      auto j = (i + 1) % 3;
       auto k = (i + 2) % 3;
-      fvec3 v{0}; v[k] = B;                        // e.g. {0, 0, B}
+
       for (auto s : Range{-B, B + 1}) {
-        fvec3 u{0}; u[j] = s;                      // e.g. {0, s, 0}
-        fvec3 p1 = u + v;                          // e.g. {0, s, B}
-        fvec3 p2 = u - v;                          // e.g. {0, s,-B}
-        fvec3 q1{0}; q1[j] = p1[k]; q1[k] = p1[j]; // e.g. {0, B, s}
-        fvec3 q2{0}; q2[j] = p2[k]; q2[k] = p2[j]; // e.g. {0,-B, s}
-        //
-        // e.g.
-        //               p1 (s, B)
-        //         |----------|----|
-        //    q2   |          |    |   q1
-        // (-B, s) |----------|----| (B, s)
-        //         |          |    |          z
-        //         |          |    |          |
-        //         |----------|--- |          +-- y
-        //               p2 (s,-B)
-        //
+        // integral coords
+        fvec3 p1_a; p1_a[i] = 0, p1_a[j] = s, p1_a[k] =  B;
+        fvec3 p2_a; p2_a[i] = 0, p2_a[j] = s, p2_a[k] = -B;
+        fvec3 p1_b; p1_b[i] = 0, p1_b[k] = s, p1_b[j] =  B;
+        fvec3 p2_b; p2_b[i] = 0, p2_b[k] = s, p2_b[j] = -B;
+        ctx_.imgui3d.addLine({p1_a, p2_a}, {1, 1, 1, .3});
+        ctx_.imgui3d.addLine({p1_b, p2_b}, {1, 1, 1, .3});
 
-        // integer grid
-        ctx_.imgui3d.addLine({p1, p2}, {1, 1, 1, .3});
-        ctx_.imgui3d.addLine({q1, q2}, {1, 1, 1, .3});
-
-        // fractional grid
-        if (s == B) { continue; }
+        if (s == B) { break; } // skip last fractional grids
         for (auto l : Range{1, D}) {
-          auto f = (float)l / D;
-          fvec3 g{0}; g[j] = f;
-          fvec3 h{0}; h[k] = f;
-          ctx_.imgui3d.addLine({p1 + g, p2 + g}, {1, 1, 1, .15});
-          ctx_.imgui3d.addLine({q1 + h, q2 + h}, {1, 1, 1, .15});
+          // fractional coords
+          float f = (float)l / D;
+          fvec3 q1_a; q1_a[i] = 0, q1_a[j] = s + f, q1_a[k] =  B;
+          fvec3 q2_a; q2_a[i] = 0, q2_a[j] = s + f, q2_a[k] = -B;
+          fvec3 q1_b; q1_b[i] = 0, q1_b[k] = s + f, q1_b[j] =  B;
+          fvec3 q2_b; q2_b[i] = 0, q2_b[k] = s + f, q2_b[j] = -B;
+          ctx_.imgui3d.addLine({q1_a, q2_a}, {1, 1, 1, .15});
+          ctx_.imgui3d.addLine({q1_b, q2_b}, {1, 1, 1, .15});
         }
       }
     }
@@ -358,11 +346,22 @@ struct ViewportPanel : Panel {
       auto [xform_s, xform_r, xform_t] = decomposeTransform(ctx_.gizmo_xform);
       {
         fmat3 so3 = ExtrinsicEulerXYZ_to_SO3(xform_r);
-        ctx_.imgui3d.addSphere(xform_t, xform_s[0], {1, 1, 1, .4});
-        ctx_.imgui3d.addCircle(xform_t, xform_s[0], so3[0], {1, 0, 0, .4}, 2);
-        ctx_.imgui3d.addCircle(xform_t, xform_s[1], so3[1], {0, 1, 0, .4}, 2);
-        ctx_.imgui3d.addCircle(xform_t, xform_s[2], so3[2], {0, 0, 1, .4}, 2);
+        ctx_.imgui3d.addSphere(xform_t, xform_s[0], {1, 1, 1, .3});
+        ctx_.imgui3d.addSphereBorder(xform_t, xform_s[0], {1, 1, 1, .6}, 2);
 
+        // NOTE: draw only half arc on front
+        int N = 48;
+        int arc_begin = - N / 4;
+        int arc_end   = + N / 4 + 1;
+        fvec3 v = ctx_.camera_position - xform_t;
+        for (auto i : Range{3}) {
+          fmat3 lookat = fmat3{lookatTransform({0, 0, 0}, so3[i], v)};
+          fvec4 color = {0, 0, 0, 0.6}; color[i] = 1;
+          ctx_.imgui3d.addArc(xform_t, xform_s[i] * 0.95, lookat[1], -lookat[0], color, arc_begin, arc_end, N, 2);
+        }
+        // ctx_.imgui3d.addCircle(xform_t, xform_s[0] * 0.95, so3[0], {1, 0, 0, .4}, 2);
+        // ctx_.imgui3d.addCircle(xform_t, xform_s[1] * 0.95, so3[1], {0, 1, 0, .4}, 2);
+        // ctx_.imgui3d.addCircle(xform_t, xform_s[2] * 0.95, so3[2], {0, 0, 1, .4}, 2);
       }
       draw_list_->AddCircleFilled(convert_sceneCo_to_imguiCo(xform_t), 3, ImColor{1.f, 0.f, 1.f, 0.8f});
 

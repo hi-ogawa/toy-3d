@@ -111,6 +111,7 @@ struct Range {
   int start_, end_;
   Range(int start, int end) : start_{start}, end_{std::max(start, end)} {}
   Range(int end) : Range(0, end) {}
+  // TODO: remove this
   Range(size_t start, size_t end) : start_{static_cast<int>(start)}, end_{static_cast<int>(std::max(start, end))} {}
   Range(size_t end) : start_{0}, end_{static_cast<int>(end)} {}
 
@@ -581,6 +582,22 @@ inline fvec3 getNonParallel(fvec3 v1) {
   fvec3 v2 = {1, 0, 0};
   fvec3 v3 = {0, 1, 0};
   return is_small(glm::cross(v1, v2)) ? v3 : v2;
+}
+
+inline std::pair<fvec3, float> getTangentCone(
+    const fvec3& cone_origin, const fvec3& sphere_center, float sphere_radius) {
+  using std::cos, std::sin, std::asin, glm::length;
+  float pi = glm::pi<float>();
+  auto& o = cone_origin;
+  auto& c = sphere_center;
+  auto& r = sphere_radius;
+
+  fvec3 v = c - o;
+  float l = length(v);
+  float t = asin(r / l); // cone half angle
+  float cone_base_radius = cos(t) * r;
+  fvec3 cone_base_center = o + v * cos(t) * cos(t);
+  return {cone_base_center, cone_base_radius};
 }
 
 // Extracted from imgui::CameraViewExperiment

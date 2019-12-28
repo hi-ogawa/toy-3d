@@ -151,6 +151,28 @@ struct DrawList3D {
     return ps;
   }
 
+  vector<fvec3> _makeArcPoints(
+      const fvec3& center, float radius, const fvec3& v1, const fvec3& v2,
+      int arc_begin, int arc_end, int num_segments) {
+    float pi = glm::pi<float>();
+
+    vector<fvec3> ps; ps.reserve(arc_end - arc_begin);
+    for (auto i : Range{arc_begin, arc_end}) {
+      using std::cos, std::sin;
+      float t = 2 * pi * i / num_segments;
+      auto& c = center;
+      auto& r = radius;
+      ps.push_back(c + r * cos(t) * v1 + r * sin(t) * v2);
+    }
+    return ps;
+  }
+
+  void addArc(
+      const fvec3& center, float radius, const fvec3& v1, const fvec3& v2, const fvec4& color,
+      int arc_begin, int arc_end, int num_segments, float thickness = 1.0f) {
+    addPath(_makeArcPoints(center, radius, v1, v2, arc_begin, arc_end, num_segments), color, thickness, /*closed*/ false);
+  }
+
   void addCircle(
       const fvec3& center, float radius, const fvec3& axis,
       const fvec4& color, float thickness = 1.0f, int num_segments = 48) {
@@ -163,18 +185,24 @@ struct DrawList3D {
     addConvexFill(_makeCirclePoints(center, radius, axis, num_segments), color);
   }
 
-  void addSphere(const fvec3& center, float radius, const fvec4& color) {
-    using std::cos, std::sin, std::asin, glm::length;
-    float pi = glm::pi<float>();
-
-    // Find tangental cone's base circle
+  void addSphere(const fvec3& center, float radius, const fvec4& color, int num_segments = 48) {
+    auto [
+      cone_base_center, // fvec3
+      cone_base_radius  // float
+    ] = utils::getTangentCone(*camera_position, center, radius);
     fvec3 camera_to_center = center - (*camera_position);
-    float l = length(camera_to_center);
-    float cone_half_angle = asin(radius / l);
-    float cone_base_radius = cos(cone_half_angle) * radius;
-    fvec3 cone_base_center = (*camera_position) + camera_to_center * cos(cone_half_angle) * cos(cone_half_angle);
+    addCircleFill(cone_base_center, cone_base_radius, camera_to_center, color, num_segments);
+  }
 
-    addCircleFill(cone_base_center, cone_base_radius, camera_to_center, color);
+  void addSphereBorder(
+      const fvec3& center, float radius, const fvec4& color,
+      float thickness = 1.0f, int num_segments = 48) {
+    auto [
+      cone_base_center, // fvec3
+      cone_base_radius  // float
+    ] = utils::getTangentCone(*camera_position, center, radius);
+    fvec3 camera_to_center = center - (*camera_position);
+    addCircle(cone_base_center, cone_base_radius, camera_to_center, color, thickness, num_segments);
   }
 };
 
