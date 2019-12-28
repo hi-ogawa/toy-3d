@@ -193,11 +193,13 @@ struct ViewportPanel : Panel {
 
     // UI state
     fvec3 pivot = {0, 0, 0};
-    fmat4 gizmo_xform = fmat4{1};
     bool grid[3] = {0, 1, 0};
     bool axis[3] = {1, 1, 1};
     int axis_bound = 10;
     int grid_division = 3;
+
+    fmat4 gizmo_xform = fmat4{1};
+    utils::imgui::GizmoRotation gizmo_rotation;
 
     // debug
     bool overlay = true;
@@ -211,6 +213,7 @@ struct ViewportPanel : Panel {
     camera_.transform_[3] = fvec4{0, 0, 4, 1};
   }
 
+  // TODO: move these to ImGui3D
   ImVec2 convert_clipCo_to_imguiCo(const fvec4& p) {
     fvec2 q = fvec2{p.x, p.y} / p.w;                   // NDCo (without depth)
     return ImVec2{ctx_.ndCo_to_imguiCo * fvec3{q, 1}}; // imguiCo
@@ -239,7 +242,12 @@ struct ViewportPanel : Panel {
     ctx_.camera_position = fvec3{camera_.transform_[3]};
     ctx_.mouse_direction = ctx_.mouse_position_scene - ctx_.camera_position;
 
-    ctx_.imgui3d = {draw_list_, &ctx_.camera_position, &ctx_.sceneCo_to_clipCo, &ctx_.ndCo_to_imguiCo};
+    ctx_.imgui3d = {
+        draw_list_, &ctx_.camera_position, &ctx_.mouse_position_scene, &ctx_.mouse_position_scene_last,
+        &ctx_.sceneCo_to_clipCo, &ctx_.ndCo_to_imguiCo};
+
+    ctx_.gizmo_rotation.imgui3d = &ctx_.imgui3d;
+    ctx_.gizmo_rotation.xform_ = &ctx_.gizmo_xform;
   }
 
   void processMenu() override {
@@ -264,7 +272,7 @@ struct ViewportPanel : Panel {
           ImGui::NextColumn();
         }
       };
-      if (ImGui::CollapsingHeader("Size/Offset", ImGuiTreeNodeFlags_DefaultOpen)) {
+      if (ImGui::CollapsingHeader("Size/Offset")) {
         ImGui::Columns(2, __FILE__, true);
         _drawColumns({
             {"offset_",         &offset_        },
@@ -274,7 +282,7 @@ struct ViewportPanel : Panel {
         });
         ImGui::Columns(1);
       };
-      if (ImGui::CollapsingHeader("Mouse", ImGuiTreeNodeFlags_DefaultOpen)) {
+      if (ImGui::CollapsingHeader("Mouse")) {
         ImGui::Columns(2, __FILE__, true);
         _drawColumns({
             {"mouse (imgui)",    &ctx_.mouse_position_imgui },
@@ -282,7 +290,7 @@ struct ViewportPanel : Panel {
         ImGui::Columns(1);
         ImGui::InputFloat3("mouse (scene)", (float*)&ctx_.mouse_position_scene, 2, ImGuiInputTextFlags_ReadOnly);
       }
-      if (ImGui::CollapsingHeader("Debug", ImGuiTreeNodeFlags_DefaultOpen)) {
+      if (ImGui::CollapsingHeader("Debug")) {
         ivec2 v = convert_sceneCo_to_imguiCo(ctx_.mouse_position_scene).glm();
         ImGui::Text("mouse (imgui -> scene -> imgui)");
         ImGui::InputInt2("###sceneCo_to_imguiCo", (int*)&v, ImGuiInputTextFlags_ReadOnly);
@@ -343,36 +351,10 @@ struct ViewportPanel : Panel {
     UI_Axes();
 
     if (ctx_.debug_gizmo) {
+      ctx_.gizmo_rotation.use();
+
       auto [xform_s, xform_r, xform_t] = decomposeTransform(ctx_.gizmo_xform);
-      {
-        fmat3 so3 = ExtrinsicEulerXYZ_to_SO3(xform_r);
-        ctx_.imgui3d.addSphere(xform_t, xform_s[0], {1, 1, 1, .3});
-        ctx_.imgui3d.addSphereBorder(xform_t, xform_s[0], {1, 1, 1, .6}, 2);
-
-        // NOTE: draw only half arc on front
-        int N = 48;
-        int arc_begin = - N / 4;
-        int arc_end   = + N / 4 + 1;
-        fvec3 v = ctx_.camera_position - xform_t;
-        for (auto i : Range{3}) {
-          fmat3 lookat = fmat3{lookatTransform({0, 0, 0}, so3[i], v)};
-          fvec4 color = {0, 0, 0, 0.6}; color[i] = 1;
-          ctx_.imgui3d.addArc(xform_t, xform_s[i] * 0.95, lookat[1], -lookat[0], color, arc_begin, arc_end, N, 2);
-        }
-        // ctx_.imgui3d.addCircle(xform_t, xform_s[0] * 0.95, so3[0], {1, 0, 0, .4}, 2);
-        // ctx_.imgui3d.addCircle(xform_t, xform_s[1] * 0.95, so3[1], {0, 1, 0, .4}, 2);
-        // ctx_.imgui3d.addCircle(xform_t, xform_s[2] * 0.95, so3[2], {0, 0, 1, .4}, 2);
-      }
-      draw_list_->AddCircleFilled(convert_sceneCo_to_imguiCo(xform_t), 3, ImColor{1.f, 0.f, 1.f, 0.8f});
-
       if (ImGui::IsMouseDown(0)) {
-        if (ImGui::GetIO().KeyCtrl) {
-          fvec3 axis = {0, 0, 1};
-          float delta = gizmoControl_Rotation(
-              ctx_.mouse_position_scene, ctx_.mouse_position_scene_last,
-              ctx_.camera_position, xform_t, axis);
-          xform_r += delta * axis;
-        }
         if (ImGui::GetIO().KeyShift) {
           {
             fvec3 axis = {1, 0, 0};

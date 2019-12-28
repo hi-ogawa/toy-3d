@@ -60,15 +60,23 @@ inline bool InputTransform(
   return changed;
 };
 
+// TODO: Rename to ImGui3D
 struct DrawList3D {
   ImDrawList* draw_list;
   const fvec3* camera_position;
+  const fvec3* mouse_position;      // in sceneCo
+  const fvec3* mouse_position_last; // in sceneCo
   const fmat4* sceneCo_to_clipCo;
   const fmat3* ndCo_to_imguiCo;
 
   ImVec2 clipCo_to_imguiCo(const fvec4& p) {
     fvec2 q = fvec2{p.x, p.y} / p.w;                 // NDCo (without depth)
     return ImVec2{(*ndCo_to_imguiCo) * fvec3{q, 1}}; // imguiCo
+  }
+
+  ImVec2 sceneCo_to_imguiCo(const fvec3& p1) {
+    fvec4 p2 = (*sceneCo_to_clipCo) * fvec4{p1, 1};  // ClipCo
+    return clipCo_to_imguiCo(p2);
   }
 
   void addLine(
@@ -98,6 +106,47 @@ struct DrawList3D {
       lines.push_back(*cp0_cp1);
     }
     return lines;
+  }
+
+  // NOTE: thought this might be useful to hitTest in ImGui coordinate but not utilized yet...
+  // @return possibly disconnected lines due to clipping
+  vector<array<ImVec2, 2>> getImguiCo_Path(const vector<fvec3>& ps, bool closed) {
+    vector<array<ImVec2, 2>> lines;
+    size_t N = ps.size();
+    for (auto i : Range{closed ? N : N - 1}) {
+      // Clip
+      std::optional<array<fvec4, 2>> cp0_cp1 =
+          hit::clip4D_Line_ClipVolume({
+              (*sceneCo_to_clipCo) * fvec4{ps[i],           1},
+              (*sceneCo_to_clipCo) * fvec4{ps[(i + 1) % N], 1}});
+      if (!cp0_cp1) { continue; }
+
+      // Project
+      lines.push_back({
+          clipCo_to_imguiCo((*cp0_cp1)[0]),
+          clipCo_to_imguiCo((*cp0_cp1)[1])});
+    }
+    return lines;
+  }
+
+  // @return "clip-project"-ed convex vertex points
+  vector<ImVec2> getImguiCo_ConvexFill(const vector<fvec3>& ps) {
+    vector<ImVec2> result = {};
+
+    // Clip
+    vector<fvec4> qs{ps.size()};
+    for (auto i : Range{ps.size()}) {
+      qs[i] = (*sceneCo_to_clipCo) * fvec4{ps[i], 1};
+    }
+    vector<fvec4> cs = hit::clip4D_ConvexPoly_ClipVolume(qs);
+    if (cs.size() < 3) { return result; }
+
+    // Project
+    result.resize(cs.size());
+    for (auto i : Range{cs.size()}) {
+      result[i] = clipCo_to_imguiCo(cs[i]);
+    }
+    return result;
   }
 
   void addPath(const vector<fvec3>& ps, const fvec4& color, float thickness = 1.0f, bool closed = false) {
@@ -167,10 +216,39 @@ struct DrawList3D {
     return ps;
   }
 
+  vector<fvec3> _makeArcPoints_v2(
+      const fvec3& center, float radius, const fvec3& v1, const fvec3& v2,
+      float arc_begin, float arc_end, int num_segments) {
+    float pi = glm::pi<float>();
+
+    vector<fvec3> ps; ps.resize(num_segments + 1);
+    for (auto i : Range{num_segments + 1}) {
+      using std::cos, std::sin;
+      float t = arc_begin + (arc_end - arc_begin) * i / num_segments;
+      auto& c = center;
+      auto& r = radius;
+      ps[i] = c + r * cos(t) * v1 + r * sin(t) * v2;
+    }
+    return ps;
+  }
+
+  // TODO: migrate _makeArcPoints_v2
   void addArc(
       const fvec3& center, float radius, const fvec3& v1, const fvec3& v2, const fvec4& color,
       int arc_begin, int arc_end, int num_segments, float thickness = 1.0f) {
-    addPath(_makeArcPoints(center, radius, v1, v2, arc_begin, arc_end, num_segments), color, thickness, /*closed*/ false);
+    vector<fvec3> ps = _makeArcPoints(center, radius, v1, v2, arc_begin, arc_end, num_segments);
+    vector<array<ImVec2, 2>> qs = getImguiCo_Path(ps, /*closed*/ false);
+    for (auto& [p1, p2] : qs) {
+      draw_list->AddLine(p1, p2, ImColor{ImVec4{color}}, thickness);
+    }
+  }
+
+  void addArcFill(
+      const fvec3& center, float radius, const fvec3& v1, const fvec3& v2, const fvec4& color,
+      float arc_begin, float arc_end, int num_segments) {
+    vector<fvec3> ps = _makeArcPoints_v2(center, radius, v1, v2, arc_begin, arc_end, num_segments);
+    ps.push_back(center);
+    addConvexFill(ps, color);
   }
 
   void addCircle(
@@ -203,6 +281,163 @@ struct DrawList3D {
     ] = utils::getTangentCone(*camera_position, center, radius);
     fvec3 camera_to_center = center - (*camera_position);
     addCircle(cone_base_center, cone_base_radius, camera_to_center, color, thickness, num_segments);
+  }
+};
+
+// TODO:
+// - [x] fixed step change
+// - [x] draw diff angle
+// - [x] cancel by escape
+// - [ ] scene axial rotation (currently local frame mode)
+struct GizmoRotation {
+  DrawList3D* imgui3d;
+  fmat4* xform_;
+
+  // state
+  uint8_t axis_; // x: 0, y: 1, z: 2
+  bool active_  = false;
+  bool hovered_ = false;
+  array<fvec3, 3> plane_hits_;         // setup on each frame `handleEvent`
+  array<fvec3, 3> plane_hits_initial_; // setup on activate
+  fmat4 xform_initial_;                // setup on activate
+
+  // parameters, constants
+  bool local; // todo (currently local frame mode)
+  float step = glm::pi<float>() * 1 / 180;
+  float radius = 1.0;
+  float arc_radius = 0.95;
+  int N = 48;
+  int arc_begin = - N / 4;
+  int arc_end   = + N / 4 + 1;
+
+
+  void handleEvent() {
+    auto [xform_s, xform_r, xform_t] = decomposeTransform_v2(*xform_);
+
+    // Update plane_hits_ (hit test on sphere sections (i.e. 3 disks))
+    hovered_ = false;
+    {
+      using glm::length;
+      bool disk_hits[3] = {false, false, false};
+      float plane_depths[3];
+      const fvec3& p = *imgui3d->mouse_position;
+      const fvec3& q = *imgui3d->camera_position;
+      fvec3 v = p - q;
+      for (auto i : Range{3}) {
+        std::optional<float> t = hit::Line_Plane(q, v, xform_t, xform_r[i]);
+        if (t) {
+          plane_depths[i] = *t;
+          plane_hits_[i] = q + (*t) * v;
+          disk_hits[i] = glm::length(plane_hits_[i] - xform_t) < radius;
+        }
+      }
+      float min_depth = FLT_MAX;
+      for (auto i : Range{3}) {
+        if (!disk_hits[i] || plane_depths[i] < 0) { continue; }
+
+        if (plane_depths[i] <= min_depth) {
+          min_depth = plane_depths[i];
+          hovered_ = true;
+
+          // Update `axis_` only when not `active_`
+          if (!active_) {
+            axis_ = i;
+          }
+        }
+      }
+    }
+
+    // "immidiate update" during active
+    if (active_) {
+      auto [xform_s, xform_r, xform_t] = decomposeTransform_v2(xform_initial_);
+      fvec3 Z = xform_r[axis_];
+      fvec3 v_init = plane_hits_initial_[axis_] - xform_t;
+      fvec3 v      = plane_hits_[axis_]         - xform_t;
+      fvec3 X = glm::normalize(v_init);
+      fvec3 Y = glm::normalize(glm::cross(Z, X));
+      float diff = std::atan2(dot(Y, v), dot(X, v));
+
+      // apply "fixed step" mode
+      diff = diff - std::fmod(diff, step);
+
+      fvec3 angles = {0, 0, 0}; angles[axis_] = diff;
+      fmat3 new_xform_r = xform_r * ExtrinsicEulerXYZ_to_SO3(angles);
+      *xform_ = composeTransform_v2(xform_s, new_xform_r, xform_t);
+    }
+
+    // deactivate and reset to initial when escape is pressed
+    if (active_ && ImGui::IsKeyPressedMap(ImGuiKey_Escape)) {
+      *xform_ = xform_initial_;
+      active_ = false;
+    }
+
+    // activate on click
+    if (ImGui::GetIO().MouseClicked[0]) {
+      if (!active_ && hovered_) {
+        active_ = true;
+        xform_initial_ = *xform_;
+        plane_hits_initial_ = plane_hits_;
+      }
+    }
+
+    // deactivate on mouse up
+    if (active_ && !ImGui::GetIO().MouseDown[0]) {
+      active_ = false;
+    }
+  }
+
+  void draw() {
+    auto [_, xform_r, xform_t] = decomposeTransform_v2(*xform_);
+
+    // small dots on center
+    imgui3d->draw_list->AddCircleFilled(imgui3d->sceneCo_to_imguiCo(xform_t), 3, ImColor{fvec4{1, 1, 0, 1}});
+
+    // sphere with border at the position
+    imgui3d->addSphere(xform_t, radius, {1, 1, 1, .2});
+    imgui3d->addSphereBorder(xform_t, radius, {1, 1, 1, .6}, 2);
+
+    // axix-orthogonal section of sphere
+    {
+      fvec3 v = (*imgui3d->camera_position) - xform_t;
+      for (auto i : Range{3}) {
+        fmat3 lookat = fmat3{lookatTransform({0, 0, 0}, xform_r[i], v)};
+        if (axis_ == i && active_) {
+          imgui3d->addCircleFill(xform_t, arc_radius, xform_r[i], {1, 1, 0, .2});
+          imgui3d->addCircle(    xform_t, arc_radius, xform_r[i], {1, 1, 0, .5}, 2);
+
+          // radial line passing initial/current mouse
+          fvec3 v_init = glm::normalize(plane_hits_initial_[i] - xform_t) * arc_radius;
+          fvec3 v      = glm::normalize(plane_hits_[i]         - xform_t) * arc_radius;
+          imgui3d->addLine({xform_t, xform_t + v_init}, {1, 1, 0, .8});
+          imgui3d->addLine({xform_t, xform_t + v     }, {1, 1, 0, .8});
+
+          // Fill current diff angle
+          fvec3 Z = xform_r[axis_];
+          fvec3 X = glm::normalize(v_init);
+          fvec3 Y = glm::normalize(glm::cross(Z, X));
+          float diff = std::atan2(dot(Y, v), dot(X, v));
+          imgui3d->addArcFill(xform_t, arc_radius, X, Y, {1, 1, 0, .5}, 0, diff, 24);
+
+        } else if (axis_ == i && hovered_) {
+          imgui3d->addCircleFill(xform_t, arc_radius, xform_r[i], {0, 1, 1, .2});
+          imgui3d->addCircle(xform_t, arc_radius, xform_r[i], {0, 1, 1, .6}, 2);
+
+          // radial line passing current mouse
+          fvec3 v = glm::normalize(plane_hits_[i] - xform_t) * arc_radius;
+          imgui3d->addLine({xform_t, xform_t + v}, {0, 1, 1, .8});
+
+        } else {
+          // draw only half arc towards camera
+          fvec4 color = {0, 0, 0, 0.6}; color[i] = 1;
+          imgui3d->addArc(xform_t, arc_radius, lookat[1], -lookat[0], color, arc_begin, arc_end, N, 2);
+        }
+      }
+    }
+  }
+
+  void use() {
+    handleEvent();
+    draw();
   }
 };
 

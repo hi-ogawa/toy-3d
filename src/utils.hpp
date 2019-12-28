@@ -515,7 +515,7 @@ inline fvec4 SO3_to_UnitQuaternion(fmat3 so3) {
   return {};
 }
 
-inline std::tuple<fvec3, fvec3, fvec3> decomposeTransform(const fmat4& xform) {
+inline std::tuple<fvec3, fmat3, fvec3> decomposeTransform_v2(const fmat4& xform) {
   fmat3 A = xform;
   fmat3 R;
   fvec3 s;
@@ -541,18 +541,27 @@ inline std::tuple<fvec3, fvec3, fvec3> decomposeTransform(const fmat4& xform) {
   R = { A[0] * h / s.x,   A[1] * h / s.y,   A[2] * h / s.z };
 
   return {
-      h * s,                  // (signed) scale
-      SO3_to_ExtrinsicXYZ(R), // rotation
-      xform[3],               // translation
+      h * s,    // (signed) scale
+      R,        // rotation as SO3
+      xform[3], // translation
   };
 }
 
-inline fmat4 composeTransform(const fvec3& s, const fvec3& r, const fvec3& t) {
-  fmat3 R = ExtrinsicEulerXYZ_to_SO3(r);
+inline std::tuple<fvec3, fvec3, fvec3> decomposeTransform(const fmat4& xform) {
+  auto [s, r, t] = decomposeTransform_v2(xform);
+  return {s, SO3_to_ExtrinsicXYZ(r), t};
+}
+
+inline fmat4 composeTransform_v2(const fvec3& s, const fmat3& R, const fvec3& t) {
   return { {R[0] * s.x, 0},
            {R[1] * s.y, 0},
            {R[2] * s.z, 0},
            {         t, 1}, };
+}
+
+inline fmat4 composeTransform(const fvec3& s, const fvec3& r, const fvec3& t) {
+  fmat3 R = ExtrinsicEulerXYZ_to_SO3(r);
+  return composeTransform_v2(s, R, t);
 }
 
 inline fmat4 translateTransform(const fvec3& t) {
