@@ -199,9 +199,10 @@ struct ViewportPanel : Panel {
     int grid_division = 3;
 
     fmat4 gizmo_xform = fmat4{1};
-    utils::imgui::GizmoRotation gizmo_rotation;
+    utils::imgui::GizmoRotation    gizmo_rotation;
     utils::imgui::GizmoTranslation gizmo_translation;
-    enum GizmoMode { kRotation, kTranslation, kScale } gizmo_mode = kTranslation;
+    utils::imgui::GizmoScale       gizmo_scale;
+    enum GizmoMode { kRotation, kTranslation, kScale } gizmo_mode = kScale;
 
     // debug
     bool overlay = true;
@@ -252,6 +253,8 @@ struct ViewportPanel : Panel {
     ctx_.gizmo_rotation.xform_ = &ctx_.gizmo_xform;
     ctx_.gizmo_translation.imgui3d = &ctx_.imgui3d;
     ctx_.gizmo_translation.xform_ = &ctx_.gizmo_xform;
+    ctx_.gizmo_scale.imgui3d = &ctx_.imgui3d;
+    ctx_.gizmo_scale.xform_ = &ctx_.gizmo_xform;
   }
 
   void processMenu() override {
@@ -310,6 +313,11 @@ struct ViewportPanel : Panel {
         _MACRO(Translation) ImGui::SameLine();
         _MACRO(Scale)
         #undef _MACRO
+        if (auto _ = ImScoped::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+          ImGui::SameLine();
+          if (ImGui::SmallButton("Reset")) { ctx_.gizmo_xform = fmat4{1}; };
+          imgui::InputTransform(ctx_.gizmo_xform);
+        }
       }
     }
   }
@@ -368,17 +376,8 @@ struct ViewportPanel : Panel {
         ctx_.gizmo_rotation.use();
       if (ctx_.gizmo_mode == UIContext::kTranslation)
         ctx_.gizmo_translation.use();
-
-      auto [xform_s, xform_r, xform_t] = decomposeTransform(ctx_.gizmo_xform);
-      if (ImGui::IsMouseDown(0)) {
-        if (ImGui::GetIO().KeyAlt) {
-          float delta_ratio = gizmoControl_Scale3D(
-              ctx_.mouse_position_scene, ctx_.mouse_position_scene_last,
-              ctx_.camera_position, xform_t);
-          xform_s *= delta_ratio;
-        }
-      }
-      ctx_.gizmo_xform = composeTransform(xform_s, xform_r, xform_t);
+      if (ctx_.gizmo_mode == UIContext::kScale)
+        ctx_.gizmo_scale.use();
     }
 
     if (ImGui::IsMouseDown(1)) {

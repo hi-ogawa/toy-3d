@@ -470,7 +470,7 @@ struct GizmoTranslation {
   void handleEvent() {
     auto [xform_s, xform_r, xform_t] = decomposeTransform_v2(*xform_);
 
-    // Hit testing (update hovered_, axis_hits_, plane_hits_)
+    // Hit testing (update hovered_, axis_hits_, rect_hits_)
     hovered_ = false;
     {
       // project mouse to axes and planes
@@ -651,10 +651,315 @@ struct GizmoTranslation {
   }
 };
 
+// TODO:
+// - bad code reuse of GizmoTranslation (cf. [DIFF] below)
+// - negative scale
 struct GizmoScale {
+  DrawList3D* imgui3d;
+  fmat4* xform_;
+
+  // state
+  uint8_t axis_; // x: 0, y: 1, z: 2
+  bool plane_mode_ = false;            // mode for 2D translation orthgonal to "axis_"
+  bool active_  = false;               // "active_ && !hovered_" is a legitimate state
+  bool hovered_ = false;
+  array<fvec3, 3> axis_hits_;          // setup on each frame during `handleEvent` (it's not "hit", but "closest point")
+  array<fvec3, 3> plane_hits_;         // setup on each frame during `handleEvent`
+  array<fvec3, 3> axis_hits_initial_;  // setup on activate (quite redundant but code looks cleaner)
+  array<fvec3, 3> plane_hits_initial_; // setup on activate
+  fmat4 xform_initial_;                // setup on activate
+
+  // parameters, constants
+  bool local; // todo (currently local frame mode only)
+  float step = 0.1;
+  float len1 = 1;               // arrow length
+  float len2 = 0.1, len3 = 0.4; // rect side start/end
+
+  // state added to GizmoTranslation [DIFF]
+  bool diag_mode_ = false;
+  bool diag_hovered_ = false;
+  fvec3 diag_hit_;
+  fvec3 diag_hit_initial_;
+
+
   void handleEvent() {
+    auto [xform_s, xform_r, xform_t] = decomposeTransform_v2(*xform_);
+
+    // Hit testing (update hovered_, axis_hits_, rect_hits_)
+    hovered_ = false;
+    {
+      // project mouse to axes and planes
+      bool arrow_hits[3]    = {false, false, false};
+      bool rect_hits[3]     = {false, false, false};
+      float axis_depths[3]  = {FLT_MAX, FLT_MAX, FLT_MAX};
+      float plane_depths[3] = {FLT_MAX, FLT_MAX, FLT_MAX};
+      {
+        const fvec3& p = *imgui3d->mouse_position;
+        const fvec3& q = *imgui3d->camera_position;
+        fvec3 v = p - q;
+        for (auto i : Range{3}) {
+          int j = (i + 1) % 3;
+          int k = (i + 2) % 3;
+          {
+            // project to plane
+            std::optional<float> t = hit::Line_Plane(q, v, xform_t, xform_r[i]);
+            if (t) {
+              plane_depths[i] = *t;
+              plane_hits_[i] = q + (*t) * v;
+
+              // hit test rectangle
+              fvec3 r = glm::inverse(xform_r) * (plane_hits_[i] - xform_t);
+              if (len2 <= r[j] && r[j] <= len3 && len2 <= r[k] && r[k] <= len3) {
+                rect_hits[i] = true;
+              }
+            }
+          }
+          {
+            // project to axis (i.e. closest point)
+            float t = hit::Line_Line(q, v, xform_t, xform_r[i]);
+            axis_depths[i] = t;
+            axis_hits_[i] = q + t * v;
+
+            // hit test arrow
+            float s = hit::Line_Point(xform_t, xform_r[i], axis_hits_[i]);
+            fvec3 r = xform_t + s * xform_r[i];
+            if (0 <= s && s <= len1 && glm::length(axis_hits_[i] - r) < len2) {
+              arrow_hits[i] = true;
+            }
+          }
+        }
+      }
+
+      // Update "hovered_" based on current "arrow_hits" and "rect_hits".
+      // Also we change/setup "axis_" and "plane_mode_" only when not "active_".
+      float min_depth = FLT_MAX;
+      for (auto i : Range{3}) {
+        if (rect_hits[i] && 0 < plane_depths[i] && plane_depths[i] <= min_depth) {
+          min_depth = plane_depths[i];
+          hovered_ = true;
+          if (!active_) {
+            axis_ = i;
+            plane_mode_ = true;
+          }
+        }
+        if (arrow_hits[i] && 0 < axis_depths[i] && axis_depths[i] <= min_depth) {
+          min_depth = axis_depths[i];
+          hovered_ = true;
+          if (!active_) {
+            axis_ = i;
+            plane_mode_ = false;
+          }
+        }
+      }
+
+      // Handle diagonal line [DIFF]
+      diag_hovered_ = false;
+      {
+        fvec3 diag = glm::normalize(fvec3{xform_r[0] + xform_r[1] + xform_r[2]});
+        const fvec3& p = *imgui3d->mouse_position;
+        const fvec3& q = *imgui3d->camera_position;
+        fvec3 v = p - q;
+
+        // project to diagonal (i.e. closest point)
+        float t = hit::Line_Line(q, v, xform_t, diag);
+        diag_hit_ = q + t * v;
+
+        // hit test arrow
+        float s = hit::Line_Point(xform_t, diag, diag_hit_);
+        fvec3 r = xform_t + s * diag;
+        if (0 <= s && s <= len1 && glm::length(diag_hit_ - r) < len2) {
+          diag_hovered_ = true;
+          if (!active_) {
+            diag_mode_ = true;
+            // TODO: don't overwrite other
+            hovered_ = false;
+            axis_ = -1;
+          }
+        } else {
+          if (!active_) {
+            diag_mode_ = false;
+          }
+        }
+      }
+    }
+
+    // "immidiate update" during active [DIFF]
+    if (active_) {
+      using glm::dot;
+      // NOTE: TODO: just using `xform_r_init` here doesn't solve zero scale problem.
+      auto [xform_s_init, _, __] = decomposeTransform_v2(xform_initial_);
+      int i = axis_;
+      int j = (i + 1) % 3;
+      int k = (i + 2) % 3;
+
+      if (diag_mode_) {
+        // 1D constrained scale
+        fvec3 diag = glm::normalize(fvec3{xform_r[0] + xform_r[1] + xform_r[2]});
+        fvec3 v_init = diag_hit_initial_ - xform_t;
+        fvec3 v =      diag_hit_ -         xform_t;
+        float diff_ratio = dot(v, diag) / dot(v_init, diag);
+
+        // apply "fixed step" mode
+        diff_ratio = diff_ratio - std::fmod(diff_ratio, step);
+        diff_ratio = std::max(diff_ratio, step); // TODO: for now make lowerbound of scale
+
+        fvec3 new_xform_s = diff_ratio * xform_s_init;
+        *xform_ = composeTransform_v2(new_xform_s, xform_r, xform_t);
+
+      } else if (plane_mode_) {
+        // 2D constrained scale
+        fvec3 v_init = plane_hits_initial_[i] - xform_t;
+        fvec3 v =      plane_hits_[i]         - xform_t;
+
+        fvec2 diff_ratios = {
+            dot(v, xform_r[j]) / dot(v_init, xform_r[j]),
+            dot(v, xform_r[k]) / dot(v_init, xform_r[k])};
+
+        // apply "fixed step" mode
+        diff_ratios[0] = diff_ratios[0] - std::fmod(diff_ratios[0], step);
+        diff_ratios[1] = diff_ratios[1] - std::fmod(diff_ratios[1], step);
+        diff_ratios[0] = std::max(diff_ratios[0], step); // TODO: for now make lowerbound of scale
+        diff_ratios[1] = std::max(diff_ratios[1], step); // TODO: for now make lowerbound of scale
+
+        fvec3 factors = {1, 1, 1}; factors[j] =  diff_ratios[0]; factors[k] =  diff_ratios[1];
+        fvec3 new_xform_s = xform_s_init * factors;
+        *xform_ = composeTransform_v2(new_xform_s, xform_r, xform_t);
+
+      } else {
+        // 1D constrained scale
+        fvec3 v_init = axis_hits_initial_[i] - xform_t;
+        fvec3 v =      axis_hits_[i] -         xform_t;
+        float diff_ratio = dot(v, xform_r[i]) / dot(v_init, xform_r[i]);
+
+        // apply "fixed step" mode
+        diff_ratio = diff_ratio - std::fmod(diff_ratio, step);
+        diff_ratio = std::max(diff_ratio, step); // TODO: for now make lowerbound of scale
+
+        fvec3 factors = {1, 1, 1}; factors[i] = diff_ratio;
+        fvec3 new_xform_s = xform_s_init * factors;
+        *xform_ = composeTransform_v2(new_xform_s, xform_r, xform_t);
+      }
+    }
+
+    // deactivate and reset to initial when escape is pressed
+    if (active_ && ImGui::IsKeyPressedMap(ImGuiKey_Escape)) {
+      *xform_ = xform_initial_;
+      active_ = false;
+    }
+
+    // activate on click
+    if (ImGui::GetIO().MouseClicked[0]) {
+      if (!active_ && hovered_) {
+        active_ = true;
+        xform_initial_ = *xform_;
+        axis_hits_initial_ = axis_hits_;
+        plane_hits_initial_ = plane_hits_;
+      }
+      // [DIFF]
+      if (!active_ && diag_hovered_) {
+        active_ = true;
+        xform_initial_ = *xform_;
+        diag_hit_initial_ = diag_hit_;
+      }
+    }
+
+    // deactivate on mouse up
+    if (active_ && !ImGui::GetIO().MouseDown[0]) {
+      active_ = false;
+    }
   }
+
   void draw() {
+    auto [xform_s, xform_r, xform_t] = decomposeTransform_v2(*xform_);
+
+    // small dots on center
+    imgui3d->draw_list->AddCircleFilled(imgui3d->sceneCo_to_imguiCo(xform_t), 3, ImColor{fvec4{1, 1, 0, 1}});
+
+    // preview current scale as cube wireframe [DIFF]
+    {
+      fvec3 ps[] = {
+          {0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0},
+          {0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}};
+      int ids[][2] = {
+          {0, 1}, {1, 2}, {2, 3}, {3, 0},
+          {4, 5}, {5, 6}, {6, 7}, {7, 4},
+          {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+      for (auto i : Range{12}) {
+        fvec3 p = fvec3{(*xform_) * fvec4{ps[ids[i][0]], 1}};
+        fvec3 q = fvec3{(*xform_) * fvec4{ps[ids[i][1]], 1}};
+        imgui3d->addLine({p, q}, {1, 1, 1, 0.5});
+      }
+    }
+
+    for (auto i : Range{3}) {
+      int j = (i + 1) % 3;
+      int k = (i + 2) % 3;
+      fvec3 color = {0, 0, 0}; color[i] = 1;
+      fvec3& o = xform_t;
+      fvec3& u1 = xform_r[i];
+      fvec3& u2 = xform_r[j];
+      fvec3& u3 = xform_r[k];
+
+      // arrow
+      {
+        fvec3 c = color;
+        float alpha = 0.5;
+        float circle_size = 4;
+        if (axis_ == i && !plane_mode_) {
+          if (active_) {
+            c = {1, 1, 0};
+          }
+          if (active_ || hovered_) {
+            alpha = 0.8;
+            circle_size = 5;
+          }
+        }
+        imgui3d->addLine({o, o + u1 * len1}, fvec4{c, alpha}, 5);
+        imgui3d->draw_list->AddCircleFilled(imgui3d->sceneCo_to_imguiCo(o + u1 * len1), circle_size, ImColor{fvec4{c, 1}});
+      }
+
+      // rectangle
+      {
+        fvec3 c = color;
+        float alpha = 0.3;
+        if (axis_ == i && plane_mode_) {
+          if (active_) {
+            c = {1, 1, 0};
+          }
+          if (active_ || hovered_) {
+            alpha = 0.5;
+          }
+        }
+        glm::fmat2x3 F = {u2, u3};
+        fvec2 vs[4] = {{len2, len2}, {len3, len2}, {len3, len3}, {len2, len3}};
+        imgui3d->addConvexFill({o + F * vs[0], o + F * vs[1], o + F * vs[2], o + F * vs[3]}, fvec4{c, alpha});
+      }
+    }
+
+    // diagonal [DIFF]
+    {
+      fvec3& o = xform_t;
+      fvec3 diag = glm::normalize(xform_r[0] + xform_r[1] + xform_r[2]);
+      fvec3 c = {1, 1, 1};
+      float alpha = 0.5;
+      float circle_size = 4;
+      if (diag_mode_) {
+        if (active_) {
+          c = {1, 1, 0};
+        }
+        if (active_ || diag_hovered_) {
+          alpha = 0.8;
+          circle_size = 5;
+        }
+      }
+      imgui3d->addLine({o, o + diag * len1}, fvec4{c, alpha}, 5);
+      imgui3d->draw_list->AddCircleFilled(imgui3d->sceneCo_to_imguiCo(o + diag * len1), circle_size, ImColor{fvec4{c, 1}});
+    }
+  }
+
+  void use() {
+    handleEvent();
+    draw();
   }
 };
 
