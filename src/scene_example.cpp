@@ -200,6 +200,8 @@ struct ViewportPanel : Panel {
 
     fmat4 gizmo_xform = fmat4{1};
     utils::imgui::GizmoRotation gizmo_rotation;
+    utils::imgui::GizmoTranslation gizmo_translation;
+    enum GizmoMode { kRotation, kTranslation, kScale } gizmo_mode = kTranslation;
 
     // debug
     bool overlay = true;
@@ -248,6 +250,8 @@ struct ViewportPanel : Panel {
 
     ctx_.gizmo_rotation.imgui3d = &ctx_.imgui3d;
     ctx_.gizmo_rotation.xform_ = &ctx_.gizmo_xform;
+    ctx_.gizmo_translation.imgui3d = &ctx_.imgui3d;
+    ctx_.gizmo_translation.xform_ = &ctx_.gizmo_xform;
   }
 
   void processMenu() override {
@@ -297,6 +301,15 @@ struct ViewportPanel : Panel {
 
         ImGui::Text("Debug sceneCo <-> imguiCo"); ImGui::SameLine();
         ImGui::Checkbox("###scenCo<->imguiCo", &ctx_.debug_sceneCo_imguiCo);
+      }
+      if (ImGui::CollapsingHeader("Gizmo")) {
+        #define _MACRO(NAME) \
+          if (ImGui::RadioButton(#NAME, ctx_.gizmo_mode == UIContext::k##NAME)) \
+            ctx_.gizmo_mode = UIContext::k##NAME;
+        _MACRO(Rotation)    ImGui::SameLine();
+        _MACRO(Translation) ImGui::SameLine();
+        _MACRO(Scale)
+        #undef _MACRO
       }
     }
   }
@@ -351,27 +364,13 @@ struct ViewportPanel : Panel {
     UI_Axes();
 
     if (ctx_.debug_gizmo) {
-      ctx_.gizmo_rotation.use();
+      if (ctx_.gizmo_mode == UIContext::kRotation)
+        ctx_.gizmo_rotation.use();
+      if (ctx_.gizmo_mode == UIContext::kTranslation)
+        ctx_.gizmo_translation.use();
 
       auto [xform_s, xform_r, xform_t] = decomposeTransform(ctx_.gizmo_xform);
       if (ImGui::IsMouseDown(0)) {
-        if (ImGui::GetIO().KeyShift) {
-          {
-            fvec3 axis = {1, 0, 0};
-            float delta = gizmoControl_Translation1D(
-                ctx_.mouse_position_scene, ctx_.mouse_position_scene_last,
-                ctx_.camera_position, xform_t, axis);
-            // xform_t += delta * axis;
-          }
-          {
-            fvec3 u1 = {1, 0, 0};
-            fvec3 u2 = {0, 1, 0};
-            array<float, 2> delta = gizmoControl_Translation2D(
-                ctx_.mouse_position_scene, ctx_.mouse_position_scene_last,
-                ctx_.camera_position, xform_t, u1, u2);
-            xform_t += delta[0] * u1 + delta[1] * u2;
-          }
-        }
         if (ImGui::GetIO().KeyAlt) {
           float delta_ratio = gizmoControl_Scale3D(
               ctx_.mouse_position_scene, ctx_.mouse_position_scene_last,
