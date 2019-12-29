@@ -11,6 +11,7 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <glm/glm.hpp>
+#include <material_icons.h> // MD_FOR_EACH_ICON, MD_ICON_MIN, MD_ICON_MAX
 #include "utils.hpp"
 
 
@@ -30,6 +31,7 @@ struct WindowInitParams {
 
   // imgui
   const char* imgui_font = TOY_PATH("thirdparty/imgui/misc/fonts/Roboto-Medium.ttf");
+  const char* imgui_icon_font = TOY_PATH("thirdparty/material-design-icons/MaterialIcons-Regular.ttf");
 };
 
 struct Window {
@@ -90,6 +92,14 @@ struct Window {
     ImGui::GetStyle().ScrollbarRounding = 2;
     ImGui::GetStyle().ScrollbarSize = 10;
 
+    // Setup icon font (cf. IconViewerPanel in panel_system_utils.hpp)
+    ImFontConfig config;
+    config.MergeMode = true;
+    config.GlyphMinAdvanceX = 20.0f;
+    static const ImWchar icon_ranges[] = { MD_ICON_MIN, MD_ICON_MAX, 0 };
+    ImGui::GetIO().Fonts->AddFontFromFileTTF(params.imgui_icon_font, 15.0f, &config, icon_ranges);
+
+    // Initialize ImGui backend
     ImGui_ImplGlfw_InitForOpenGL(glfw_window_, true);
     ImGui_ImplOpenGL3_Init(params.glsl_version);
     imgui_context_ = ImGui::GetCurrentContext();

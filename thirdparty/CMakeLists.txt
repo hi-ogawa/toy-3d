@@ -103,3 +103,12 @@ add_subdirectory(yocto-gl EXCLUDE_FROM_ALL) # => add_library(yocto ...)
 
 # patch the target in order to propagate include directories for targets depending on this
 target_include_directories(yocto PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/yocto-gl/yocto)
+
+#
+# material-design-icons
+#
+
+add_library(material_icons INTERFACE)
+target_include_directories(material_icons INTERFACE
+  ${CMAKE_CURRENT_SOURCE_DIR}/material-design-icons
+)

@@ -42,6 +42,27 @@ struct DemoPanel : Panel {
   }
 };
 
+struct IconViewerPanel : Panel {
+  constexpr static const char* type = "Icon Viewer";
+  static Panel* newPanelFunc() { return dynamic_cast<Panel*>(new IconViewerPanel); }
+
+  #define _GET_NAME(NAME, CHAR) #NAME,
+  #define _GET_CHAR(NAME, CHAR)  CHAR,
+  inline static const char* icon_names[] = { MD_FOR_EACH_ICON(_GET_NAME) };
+  inline static const char* icon_chars[] = { MD_FOR_EACH_ICON(_GET_CHAR) };
+  #undef _GET_NAME
+  #undef _GET_CHAR
+
+  ImGuiTextFilter filter_;
+
+  void processUI() override {
+    filter_.Draw("Filter");
+    for (int i = 0; i < IM_ARRAYSIZE(icon_names); i++)
+      if (filter_.PassFilter(icon_names[i]))
+        ImGui::BulletText("%s: %s", icon_chars[i], icon_names[i]);
+  }
+};
+
 struct TestPanel : Panel {
   constexpr static const char* type = "Test";
   static Panel* newPanelFunc() { return dynamic_cast<Panel*>(new TestPanel); }
