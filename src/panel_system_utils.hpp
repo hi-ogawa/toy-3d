@@ -69,7 +69,9 @@ struct TestPanel : Panel {
   void processUI() override {
     auto& ctx = utils::imgui::global_camera_view_experiment_context_;
     ctx.viewport[0] = ImGui::GetWindowContentRegionWidth();
-    ctx.viewport[1] = content_size_.y - ImGui::GetFrameHeightWithSpacing() * 5;
+    ctx.viewport[1] = content_size_.y
+                      - ImGui::GetFrameHeightWithSpacing() * 5
+                      - ImGui::GetStyle().ItemSpacing.y * 4;
     utils::imgui::CameraViewExperiment();
   }
   void processMenu() override {

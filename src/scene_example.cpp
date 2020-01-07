@@ -96,8 +96,12 @@ struct SceneRenderer {
   }
 };
 
+struct Editor {
+  void* ctx_; // (for now, just a loophole for ViewportPanel::UIContext)
+};
 
 struct SceneManager {
+  Editor editor_; // todo: make it upside down (Editor owns SceneManager)
   unique_ptr<Scene> scene_;
   unique_ptr<SceneRenderer> renderer_;
   vector<unique_ptr<AssetRepository>> asset_repositories_;
@@ -127,8 +131,15 @@ struct SceneManager {
     }
   }
 
-  MeshBVH::RayTestResult rayTest(const fvec3& src, const fvec3& dir) const {
+  struct SceneRayIntersection {
+    MeshBVH::RayTestResult result;
+    shared_ptr<Node> node;
+  };
+
+  SceneRayIntersection rayIntersection(const fvec3& src, const fvec3& dir) const {
     MeshBVH::RayTestResult result = { .hit = false, .t = FLT_MAX };
+    shared_ptr<Node> hit_node;
+
     for (auto& node : scene_->nodes_) {
       if (!node->mesh_) { continue; }
 
@@ -145,8 +156,10 @@ struct SceneManager {
       for (auto i : Range{3}) {
         result.face[i] = fvec3{node->transform_ * fvec4{tmp_result.face[i], 1}};
       }
+      hit_node = node;
     }
-    return result;
+
+    return SceneRayIntersection{result, hit_node};
   }
 };
 
@@ -158,7 +171,7 @@ struct SceneManager {
 struct ViewportPanel : Panel {
   constexpr static const char* type = "Viewport";
   unique_ptr<utils::gl::Framebuffer> framebuffer_;
-  const SceneManager& mng_;
+  SceneManager& mng_;
   ImDrawList* draw_list_;
   Camera camera_;
 
@@ -168,6 +181,8 @@ struct ViewportPanel : Panel {
     OVERLAY,
     CHANNELS_COUNT,
   };};
+
+  // todo: migrate to EditorContext
   struct UIContext {
     // refreshed on new frame
     ivec2 mouse_position_imgui;
@@ -198,22 +213,20 @@ struct ViewportPanel : Panel {
     int axis_bound = 10;
     int grid_division = 3;
 
-    fmat4 gizmo_xform = fmat4{1};
-    utils::imgui::GizmoRotation    gizmo_rotation;
-    utils::imgui::GizmoTranslation gizmo_translation;
-    utils::imgui::GizmoScale       gizmo_scale;
-    enum GizmoMode { kRotation, kTranslation, kScale } gizmo_mode = kScale;
+    imgui::TransformGizmo gizmo;
+    shared_ptr<Node> active_node;
 
     // debug
     bool overlay = true;
     bool debug_sceneCo_imguiCo = false;
-    bool debug_ray_test = true;
+    bool debug_ray_test = false;
     bool debug_gizmo = true;
   } ctx_;
 
-  ViewportPanel(const SceneManager& mng) : mng_{mng} {
+  ViewportPanel(SceneManager& mng) : mng_{mng} {
     framebuffer_.reset(new utils::gl::Framebuffer);
     camera_.transform_[3] = fvec4{0, 0, 4, 1};
+    mng_.editor_.ctx_ = &ctx_;
   }
 
   // TODO: move these to ImGui3D
@@ -249,12 +262,9 @@ struct ViewportPanel : Panel {
         draw_list_, &ctx_.camera_position, &ctx_.mouse_position_scene, &ctx_.mouse_position_scene_last,
         &ctx_.sceneCo_to_clipCo, &ctx_.ndCo_to_imguiCo};
 
-    ctx_.gizmo_rotation.imgui3d = &ctx_.imgui3d;
-    ctx_.gizmo_rotation.xform_ = &ctx_.gizmo_xform;
-    ctx_.gizmo_translation.imgui3d = &ctx_.imgui3d;
-    ctx_.gizmo_translation.xform_ = &ctx_.gizmo_xform;
-    ctx_.gizmo_scale.imgui3d = &ctx_.imgui3d;
-    ctx_.gizmo_scale.xform_ = &ctx_.gizmo_xform;
+    if (ctx_.active_node) {
+      ctx_.gizmo.setup(ctx_.imgui3d, ctx_.active_node->transform_);
+    }
   }
 
   void processMenu() override {
@@ -307,17 +317,12 @@ struct ViewportPanel : Panel {
       }
       if (ImGui::CollapsingHeader("Gizmo")) {
         #define _MACRO(NAME) \
-          if (ImGui::RadioButton(#NAME, ctx_.gizmo_mode == UIContext::k##NAME)) \
-            ctx_.gizmo_mode = UIContext::k##NAME;
-        _MACRO(Rotation)    ImGui::SameLine();
+          if (ImGui::RadioButton(#NAME, ctx_.gizmo.mode == imgui::TransformGizmo::Mode::k##NAME)) \
+            ctx_.gizmo.mode = imgui::TransformGizmo::Mode::k##NAME;
         _MACRO(Translation) ImGui::SameLine();
+        _MACRO(Rotation)    ImGui::SameLine();
         _MACRO(Scale)
         #undef _MACRO
-        if (auto _ = ImScoped::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-          ImGui::SameLine();
-          if (ImGui::SmallButton("Reset")) { ctx_.gizmo_xform = fmat4{1}; };
-          imgui::InputTransform(ctx_.gizmo_xform);
-        }
       }
     }
   }
@@ -371,15 +376,7 @@ struct ViewportPanel : Panel {
     UI_GridPlanes();
     UI_Axes();
 
-    if (ctx_.debug_gizmo) {
-      if (ctx_.gizmo_mode == UIContext::kRotation)
-        ctx_.gizmo_rotation.use();
-      if (ctx_.gizmo_mode == UIContext::kTranslation)
-        ctx_.gizmo_translation.use();
-      if (ctx_.gizmo_mode == UIContext::kScale)
-        ctx_.gizmo_scale.use();
-    }
-
+    // (temporary) viewport camera interaction demo
     if (ImGui::IsMouseDown(1)) {
       fvec2 delta = ImGui::GetIO().MouseDelta.glm() / fvec2{framebuffer_->size_};
       if (ImGui::GetIO().KeyCtrl) {
@@ -393,14 +390,44 @@ struct ViewportPanel : Panel {
       }
     }
 
-    if (ctx_.debug_ray_test && ImGui::IsMouseDown(0)) {
-      auto result = mng_.rayTest(ctx_.camera_position, ctx_.mouse_direction);
-      if (result.hit) {
-        vector<fvec3> ps = {result.face[0], result.face[1], result.face[2]};
-        ctx_.imgui3d.addConvexFill(ps, {1, 0, 1, 1});
+    //
+    // [ editor state rule (todo: get comprehensive including all UI event on this viewport) ]
+    //
+    // no active_node => active_node
+    // - on viewport click hits node's mesh
+    //
+    // active_node => no active_node
+    // - on viewport click misses node's mesh and misses current gizmo
+    //
+    // active_node => new active_node
+    // - on viewport click hits new node's mesh and misses current gizmo
+    //
+
+    if (ctx_.active_node) {
+      ctx_.gizmo.use();
+    }
+
+    if (ImGui::IsMouseClicked(0)) {
+      if (!ctx_.gizmo.hovered()) {
+        auto intersection = mng_.rayIntersection(ctx_.camera_position, ctx_.mouse_direction);
+        if (intersection.result.hit) {
+          ctx_.active_node = intersection.node;
+        } else {
+          ctx_.active_node = nullptr;
+        }
       }
     }
 
+    // (temporary) ray intersection triangle demo
+    if (ctx_.debug_ray_test) {
+      auto intersection = mng_.rayIntersection(ctx_.camera_position, ctx_.mouse_direction);
+      if (intersection.result.hit) {
+        array<fvec3, 3>& face = intersection.result.face;
+        ctx_.imgui3d.addConvexFill({face[0], face[1], face[2]}, {1, 0, 1, .5});
+      }
+    }
+
+    // todo: remove this. such debug won't be necessary probably.
     if (ctx_.debug_sceneCo_imguiCo) {
       // Demo for sceneCo <-> imguiCo convertion
       fvec3 o = {0, 0, 0};
@@ -436,8 +463,10 @@ struct ViewportPanel : Panel {
 
     // Draw UI
     draw_list_->ChannelsSplit(DrawChannel::CHANNELS_COUNT);
+
     draw_list_->ChannelsSetCurrent(DrawChannel::OVERLAY);
     UI_Overlay();
+
     draw_list_->ChannelsSetCurrent(DrawChannel::GIZMO);
     UI_Gizmo();
   }
@@ -459,6 +488,7 @@ struct ViewportPanel : Panel {
   }
 };
 
+// todo: rename to PropertyPanel
 struct AssetsPanel : Panel {
   constexpr static const char* type = "Assets";
   SceneManager& mng_;
@@ -534,8 +564,34 @@ struct AssetsPanel : Panel {
     }
   }
 
+  void UI_Active() {
+    auto& node = ((ViewportPanel::UIContext*)mng_.editor_.ctx_)->active_node;
+    if (!node) { return; }
+
+    if (auto _ = ImScoped::TreeNodeEx(node->name_.data(), ImGuiTreeNodeFlags_DefaultOpen)) {
+
+      if (auto _ = ImScoped::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Reset")) { node->transform_ = fmat4{1}; };
+        imgui::InputTransform(node->transform_);
+      }
+
+      if (auto _ = ImScoped::TreeNodeEx("(Transform Matrix)")) {
+        for (auto i : utils::Range{4}) {
+          auto _ = ImScoped::ID(i);
+          ImGui::DragFloat4(fmt::format("transform[{}]", i).data(), (float*)&node->transform_[i], .05);
+        }
+      }
+    }
+  }
+
   void processUI() override {
     if (ImGui::BeginTabBar(__FILE__)){
+      if (ImGui::BeginTabItem("Active")) {
+        auto __ = ImScoped::ID(__LINE__);
+        UI_Active();
+        ImGui::EndTabItem();
+      }
       if (ImGui::BeginTabItem("Scene")) {
         auto __ = ImScoped::ID(__LINE__);
         UI_Scene();
@@ -568,7 +624,7 @@ struct App {
 
     // load asssets
     scene_manager_->loadGltf(GLTF_MODEL_PATH("BoxTextured"));
-    scene_manager_->loadGltf(GLTF_MODEL_PATH("DamagedHelmet"));
+    // scene_manager_->loadGltf(GLTF_MODEL_PATH("DamagedHelmet"));
     scene_manager_->loadGltf(GLTF_MODEL_PATH("Suzanne"));
 
     // panel system setup

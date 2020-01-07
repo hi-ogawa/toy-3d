@@ -467,6 +467,10 @@ struct GizmoTranslation {
   float len2 = 0.1, len3 = 0.4; // rect side start/end
 
 
+  // todo: make it less "immediate-mode" by separating this into 3 steps
+  // - update "hovered" and "hits" (only handle mouse position)
+  // - handle activity (handle click, escape etc...)
+  // - apply change
   void handleEvent() {
     auto [xform_s, xform_r, xform_t] = decomposeTransform_v2(*xform_);
 
@@ -962,6 +966,53 @@ struct GizmoScale {
     draw();
   }
 };
+
+struct TransformGizmo {
+  utils::imgui::GizmoTranslation t;
+  utils::imgui::GizmoRotation    r;
+  utils::imgui::GizmoScale       s;
+  enum Mode { kTranslation, kRotation, kScale } mode = kTranslation;
+
+  void setup(imgui::DrawList3D& imgui3d, fmat4& xform) {
+    t.imgui3d = r.imgui3d = s.imgui3d = &imgui3d;
+    r.xform_ = t.xform_ = s.xform_ = &xform;
+  }
+
+  void use() {
+    switch (mode) {
+      case  kTranslation: {
+        t.use();
+        break;
+      }
+      case  kRotation: {
+        r.use();
+        break;
+      }
+      case  kScale: {
+        s.use();
+        break;
+      }
+    }
+  }
+
+  bool hovered() {
+    switch (mode) {
+      case  kTranslation: {
+        return t.hovered_;
+        break;
+      }
+      case  kRotation: {
+        return r.hovered_;
+        break;
+      }
+      case  kScale: {
+        return s.hovered_;
+        break;
+      }
+    }
+  }
+};
+
 
 //
 // Camera view interaction (experiment)
