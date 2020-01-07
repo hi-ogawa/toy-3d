@@ -65,7 +65,6 @@ struct DrawList3D {
   ImDrawList* draw_list;
   const fvec3* camera_position;
   const fvec3* mouse_position;      // in sceneCo
-  const fvec3* mouse_position_last; // in sceneCo
   const fmat4* sceneCo_to_clipCo;
   const fmat3* ndCo_to_imguiCo;
 
@@ -281,6 +280,50 @@ struct DrawList3D {
     ] = utils::getTangentCone(*camera_position, center, radius);
     fvec3 camera_to_center = center - (*camera_position);
     addCircle(cone_base_center, cone_base_radius, camera_to_center, color, thickness, num_segments);
+  }
+
+  void addAxes(int bound, int show[3], float alpha = 0.4f) {
+    for (auto i : Range{3}) {
+      if (!show[i]) { continue; }
+
+      fvec3 p{0}; p[i] = 1;
+      fvec3 p1 = p * (float)bound;
+      fvec3 p2 = - p1;
+      addLine({p1, p2}, fvec4{p, alpha});
+    }
+  }
+
+  void addGridPlanes(int bound, int division, int show[3], float alpha1 = .3f, float alpha2 = .15f) {
+    auto& B = bound;
+    auto& D = division;
+
+    for (auto i : Range{3}) {
+      if (!show[i]) { continue; }
+      auto j = (i + 1) % 3;
+      auto k = (i + 2) % 3;
+
+      for (auto s : Range{-B, B + 1}) {
+        // integral coords
+        fvec3 p1_a; p1_a[i] = 0, p1_a[j] = s, p1_a[k] =  B;
+        fvec3 p2_a; p2_a[i] = 0, p2_a[j] = s, p2_a[k] = -B;
+        fvec3 p1_b; p1_b[i] = 0, p1_b[k] = s, p1_b[j] =  B;
+        fvec3 p2_b; p2_b[i] = 0, p2_b[k] = s, p2_b[j] = -B;
+        addLine({p1_a, p2_a}, {1, 1, 1, alpha1});
+        addLine({p1_b, p2_b}, {1, 1, 1, alpha1});
+
+        if (s == B) { break; } // skip last fractional grids
+        for (auto l : Range{1, D}) {
+          // fractional coords
+          float f = (float)l / D;
+          fvec3 q1_a; q1_a[i] = 0, q1_a[j] = s + f, q1_a[k] =  B;
+          fvec3 q2_a; q2_a[i] = 0, q2_a[j] = s + f, q2_a[k] = -B;
+          fvec3 q1_b; q1_b[i] = 0, q1_b[k] = s + f, q1_b[j] =  B;
+          fvec3 q2_b; q2_b[i] = 0, q2_b[k] = s + f, q2_b[j] = -B;
+          addLine({q1_a, q2_a}, {1, 1, 1, alpha2});
+          addLine({q1_b, q2_b}, {1, 1, 1, alpha2});
+        }
+      }
+    }
   }
 };
 
@@ -687,7 +730,7 @@ struct GizmoScale {
 
 
   void handleEvent() {
-    auto [xform_s, xform_r, xform_t] = decomposeTransform_v2(*xform_);
+    auto [_, xform_r, xform_t] = decomposeTransform_v2(*xform_);
 
     // Hit testing (update hovered_, axis_hits_, rect_hits_)
     hovered_ = false;
@@ -1006,13 +1049,40 @@ struct TransformGizmo {
         break;
       }
       case  kScale: {
-        return s.hovered_;
+        return s.hovered_ || s.diag_hovered_;
         break;
       }
     }
   }
 };
 
+// from imgui_demo.cpp
+void HelpInfo(const char* desc) {
+  ImGui::TextDisabled("(?)");
+  if (ImGui::IsItemHovered()) {
+      ImGui::BeginTooltip();
+      ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+      ImGui::TextUnformatted(desc);
+      ImGui::PopTextWrapPos();
+      ImGui::EndTooltip();
+  }
+}
+
+template<typename T>
+void RadioButtons(T* p_value, vector<std::pair<const char*, T>> entries) {
+  size_t count = 0;
+  for (auto [label, value] : entries) {
+    if (count >= 1) {
+      ImGui::SameLine();
+    }
+
+    if (ImGui::RadioButton(label, *p_value == value)) {
+      *p_value = value;
+    }
+
+    count++;
+  }
+}
 
 //
 // Camera view interaction (experiment)

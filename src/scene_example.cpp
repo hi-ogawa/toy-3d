@@ -168,6 +168,7 @@ struct SceneManager {
 // UIs
 //
 
+// todo: is it possible to support multiple ViewportPanel instantiations? (not really useful though)
 struct ViewportPanel : Panel {
   constexpr static const char* type = "Viewport";
   unique_ptr<utils::gl::Framebuffer> framebuffer_;
@@ -188,7 +189,6 @@ struct ViewportPanel : Panel {
     ivec2 mouse_position_imgui;
     ivec2 mouse_position_imgui_delta;
     fvec3 mouse_position_scene;
-    fvec3 mouse_position_scene_last;
 
     // sceneCo -> cameraCo -> clipCo -> ndCo -> imguiCo
     fmat4 sceneCo_to_clipCo;
@@ -208,40 +208,22 @@ struct ViewportPanel : Panel {
 
     // UI state
     fvec3 pivot = {0, 0, 0};
-    bool grid[3] = {0, 1, 0};
-    bool axis[3] = {1, 1, 1};
+    int grid[3] = {0, 1, 0}; // bools
+    int axis[3] = {1, 1, 1}; // bools
     int axis_bound = 10;
     int grid_division = 3;
 
     imgui::TransformGizmo gizmo;
     shared_ptr<Node> active_node;
 
-    // debug
     bool overlay = true;
-    bool debug_sceneCo_imguiCo = false;
-    bool debug_ray_test = false;
-    bool debug_gizmo = true;
+    int debug_ray_test = 0; // bool
   } ctx_;
 
   ViewportPanel(SceneManager& mng) : mng_{mng} {
     framebuffer_.reset(new utils::gl::Framebuffer);
     camera_.transform_[3] = fvec4{0, 0, 4, 1};
     mng_.editor_.ctx_ = &ctx_;
-  }
-
-  // TODO: move these to ImGui3D
-  ImVec2 convert_clipCo_to_imguiCo(const fvec4& p) {
-    fvec2 q = fvec2{p.x, p.y} / p.w;                   // NDCo (without depth)
-    return ImVec2{ctx_.ndCo_to_imguiCo * fvec3{q, 1}}; // imguiCo
-  }
-
-  ImVec2 convert_sceneCo_to_imguiCo(const fvec3& p1) {
-    fvec4 p2 = ctx_.sceneCo_to_clipCo * fvec4{p1, 1};  // ClipCo
-    return convert_clipCo_to_imguiCo(p2);
-  }
-
-  fvec3 convert_imguiCo_to_sceneCo(const ivec2& q1) {
-    return ctx_.imguiCo_to_sceneCo * fvec3{q1, 1};
   }
 
   void setupContext() {
@@ -253,13 +235,13 @@ struct ViewportPanel : Panel {
 
     ctx_.mouse_position_imgui = ImGui::GetMousePos().glm();
     ctx_.mouse_position_imgui_delta = ImGui::GetIO().MouseDelta.glm();
-    ctx_.mouse_position_scene = convert_imguiCo_to_sceneCo(ctx_.mouse_position_imgui);
-    ctx_.mouse_position_scene_last = convert_imguiCo_to_sceneCo(ctx_.mouse_position_imgui - ctx_.mouse_position_imgui_delta);
+    ctx_.mouse_position_scene = ctx_.imguiCo_to_sceneCo * fvec3{ctx_.mouse_position_imgui, 1};
     ctx_.camera_position = fvec3{camera_.transform_[3]};
     ctx_.mouse_direction = ctx_.mouse_position_scene - ctx_.camera_position;
 
+    ctx_.imguiCo_to_sceneCo * fvec3{ctx_.mouse_position_imgui, 1};
     ctx_.imgui3d = {
-        draw_list_, &ctx_.camera_position, &ctx_.mouse_position_scene, &ctx_.mouse_position_scene_last,
+        draw_list_, &ctx_.camera_position, &ctx_.mouse_position_scene,
         &ctx_.sceneCo_to_clipCo, &ctx_.ndCo_to_imguiCo};
 
     if (ctx_.active_node) {
@@ -276,105 +258,65 @@ struct ViewportPanel : Panel {
   }
 
   void UI_Overlay() {
-    // NOTE: ImGui::Columns internally use `Channels`,
-    //       so instantiating them without a child window would cause conflict with our use.
     if (ctx_.overlay) {
       auto _ = ImScoped::Child(__FILE__, ImVec2{content_size_.x / 2.5f, 0.f}, false, ImGuiWindowFlags_NoMove);
-      auto _drawColumns = [](const std::map<const char*, ivec2*>& rows) {
-        for (auto [name, data] : rows) {
-          ImGui::TextUnformatted(name);
-          ImGui::NextColumn();
-          ImGui::SetNextItemWidth(-1);
-          ImGui::InputInt2(fmt::format("###{}", name).data(), (int*)data, ImGuiInputTextFlags_ReadOnly);
+
+      if (ImGui::CollapsingHeader("UI")) {
+        if (auto _ = ImScoped::TreeNodeEx("Gizmo")) {
+          utils::imgui::RadioButtons(
+              &ctx_.gizmo.mode,
+              { { "Translation", utils::imgui::TransformGizmo::Mode::kTranslation },
+                { "Rotation",    utils::imgui::TransformGizmo::Mode::kRotation    },
+                { "Scale",       utils::imgui::TransformGizmo::Mode::kScale       }, });
+        }
+
+        if (auto _ = ImScoped::TreeNodeEx("Axis/Grid")) {
+          ImGui::InputInt("bound", &ctx_.axis_bound);
+          ImGui::InputInt("division", &ctx_.grid_division);
+          ImGui::SliderInt3("axis (x, y, z)", ctx_.axis, 0, 1, "");
+          ImGui::SliderInt3("grid (yz, zx, xy)", ctx_.grid, 0, 1, "");
           ImGui::NextColumn();
         }
-      };
-      if (ImGui::CollapsingHeader("Size/Offset")) {
-        ImGui::Columns(2, __FILE__, true);
-        _drawColumns({
-            {"offset_",         &offset_        },
-            {"size_",           &size_          },
-            {"content_offset_", &content_offset_},
-            {"content_size_",   &content_size_  },
-        });
-        ImGui::Columns(1);
-      };
-      if (ImGui::CollapsingHeader("Mouse")) {
-        ImGui::Columns(2, __FILE__, true);
-        _drawColumns({
-            {"mouse (imgui)",    &ctx_.mouse_position_imgui },
-        });
-        ImGui::Columns(1);
-        ImGui::InputFloat3("mouse (scene)", (float*)&ctx_.mouse_position_scene, 2, ImGuiInputTextFlags_ReadOnly);
       }
+
       if (ImGui::CollapsingHeader("Debug")) {
-        ivec2 v = convert_sceneCo_to_imguiCo(ctx_.mouse_position_scene).glm();
-        ImGui::Text("mouse (imgui -> scene -> imgui)");
-        ImGui::InputInt2("###sceneCo_to_imguiCo", (int*)&v, ImGuiInputTextFlags_ReadOnly);
+        // ray-face intersection
+        ImGui::SliderInt("ray-face intersect", &ctx_.debug_ray_test, 0, 1, "");
 
-        ImGui::Text("Debug sceneCo <-> imguiCo"); ImGui::SameLine();
-        ImGui::Checkbox("###scenCo<->imguiCo", &ctx_.debug_sceneCo_imguiCo);
-      }
-      if (ImGui::CollapsingHeader("Gizmo")) {
-        #define _MACRO(NAME) \
-          if (ImGui::RadioButton(#NAME, ctx_.gizmo.mode == imgui::TransformGizmo::Mode::k##NAME)) \
-            ctx_.gizmo.mode = imgui::TransformGizmo::Mode::k##NAME;
-        _MACRO(Translation) ImGui::SameLine();
-        _MACRO(Rotation)    ImGui::SameLine();
-        _MACRO(Scale)
-        #undef _MACRO
-      }
-    }
-  }
+        if (auto _ = ImScoped::TreeNodeEx("Size/Offset")) {
+          // offset
+          ImGui::InputInt2("offset_", (int*)&offset_, ImGuiInputTextFlags_ReadOnly);
 
-  void UI_Axes() {
-    int B = ctx_.axis_bound;
-    for (auto i : Range{3}) {
-      if (!ctx_.axis[i]) { continue; }
+          // size
+          ImGui::InputInt2("size_", (int*)&size_, ImGuiInputTextFlags_ReadOnly);
 
-      fvec3 p{0}; p[i] = 1;
-      fvec3 p1 = p * (float)B;
-      fvec3 p2 = - p1;
-      ctx_.imgui3d.addLine({p1, p2}, fvec4{p, .4f});
-    }
-  }
+          // content offset
+          ImGui::InputInt2("content_offset_", (int*)&content_offset_, ImGuiInputTextFlags_ReadOnly);
 
-  void UI_GridPlanes() {
-    int B = ctx_.axis_bound;
-    int D = ctx_.grid_division;
+          // content size
+          ImGui::InputInt2("content_size_", (int*)&content_size_, ImGuiInputTextFlags_ReadOnly);
+        }
 
-    for (auto i : Range{3}) {
-      if (!ctx_.grid[i]) { continue; }
-      auto j = (i + 1) % 3;
-      auto k = (i + 2) % 3;
+        if (auto _ = ImScoped::TreeNodeEx("Mouse")) {
+          // mouse (imgui)
+          ImGui::InputInt2("mouse (imgui)", (int*)&ctx_.mouse_position_imgui, ImGuiInputTextFlags_ReadOnly);
 
-      for (auto s : Range{-B, B + 1}) {
-        // integral coords
-        fvec3 p1_a; p1_a[i] = 0, p1_a[j] = s, p1_a[k] =  B;
-        fvec3 p2_a; p2_a[i] = 0, p2_a[j] = s, p2_a[k] = -B;
-        fvec3 p1_b; p1_b[i] = 0, p1_b[k] = s, p1_b[j] =  B;
-        fvec3 p2_b; p2_b[i] = 0, p2_b[k] = s, p2_b[j] = -B;
-        ctx_.imgui3d.addLine({p1_a, p2_a}, {1, 1, 1, .3});
-        ctx_.imgui3d.addLine({p1_b, p2_b}, {1, 1, 1, .3});
+          // mouse (imgui*)
+          ImVec2 _v = ctx_.imgui3d.sceneCo_to_imguiCo(ctx_.mouse_position_scene);
+          ImGui::InputFloat2("mouse (imgui*)", (float*)&_v, 0, ImGuiInputTextFlags_ReadOnly);
+          ImGui::SameLine();
+          utils::imgui::HelpInfo("coord transf. via imgui -> scene -> imgui");
 
-        if (s == B) { break; } // skip last fractional grids
-        for (auto l : Range{1, D}) {
-          // fractional coords
-          float f = (float)l / D;
-          fvec3 q1_a; q1_a[i] = 0, q1_a[j] = s + f, q1_a[k] =  B;
-          fvec3 q2_a; q2_a[i] = 0, q2_a[j] = s + f, q2_a[k] = -B;
-          fvec3 q1_b; q1_b[i] = 0, q1_b[k] = s + f, q1_b[j] =  B;
-          fvec3 q2_b; q2_b[i] = 0, q2_b[k] = s + f, q2_b[j] = -B;
-          ctx_.imgui3d.addLine({q1_a, q2_a}, {1, 1, 1, .15});
-          ctx_.imgui3d.addLine({q1_b, q2_b}, {1, 1, 1, .15});
+          // mouse (scene)
+          ImGui::InputFloat3("mouse (scene)", (float*)&ctx_.mouse_position_scene, 2, ImGuiInputTextFlags_ReadOnly);
         }
       }
     }
   }
 
-  void UI_Gizmo() {
-    UI_GridPlanes();
-    UI_Axes();
+  void UI_3D() {
+    ctx_.imgui3d.addAxes(ctx_.axis_bound, ctx_.axis);
+    ctx_.imgui3d.addGridPlanes(ctx_.axis_bound, ctx_.grid_division, ctx_.grid);
 
     // (temporary) viewport camera interaction demo
     if (ImGui::IsMouseDown(1)) {
@@ -404,9 +346,11 @@ struct ViewportPanel : Panel {
     //
 
     if (ctx_.active_node) {
+      // todo: "scale by diagonal" is not working?
       ctx_.gizmo.use();
     }
 
+    // todo: detect only clicked on viewport
     if (ImGui::IsMouseClicked(0)) {
       if (!ctx_.gizmo.hovered()) {
         auto intersection = mng_.rayIntersection(ctx_.camera_position, ctx_.mouse_direction);
@@ -426,32 +370,6 @@ struct ViewportPanel : Panel {
         ctx_.imgui3d.addConvexFill({face[0], face[1], face[2]}, {1, 0, 1, .5});
       }
     }
-
-    // todo: remove this. such debug won't be necessary probably.
-    if (ctx_.debug_sceneCo_imguiCo) {
-      // Demo for sceneCo <-> imguiCo convertion
-      fvec3 o = {0, 0, 0};
-      fvec3 z = glm::normalize(ctx_.camera_position + 2.0f * ctx_.mouse_direction);
-      fvec3 x = glm::normalize(glm::cross(fvec3{0, 1, 0}, z));;
-      fvec3 y = glm::normalize(glm::cross(z, x));
-
-      ImVec2 _o = convert_sceneCo_to_imguiCo(o / 2.0f);
-      ImVec2 _x = convert_sceneCo_to_imguiCo(x / 2.0f);
-      ImVec2 _y = convert_sceneCo_to_imguiCo(y / 2.0f);
-      ImVec2 _z = convert_sceneCo_to_imguiCo(z / 2.0f);
-      ImColor w = {1.f, 1.f, 1.f, 0.6f};
-      ImColor r = {1.f, 0.f, 0.f, 0.6f};
-      ImColor g = {0.f, 1.f, 0.f, 0.6f};
-      ImColor b = {0.f, 0.f, 1.f, 0.6f};
-
-      draw_list_->AddLine(_o, _x, r);
-      draw_list_->AddLine(_o, _y, g);
-      draw_list_->AddLine(_o, _z, b);
-      draw_list_->AddCircleFilled(_o, 4.0f, w);
-      draw_list_->AddCircleFilled(_x, 4.0f, r);
-      draw_list_->AddCircleFilled(_y, 4.0f, g);
-      draw_list_->AddCircleFilled(_z, 4.0f, b);
-    }
   }
 
   void processUI() override {
@@ -468,7 +386,7 @@ struct ViewportPanel : Panel {
     UI_Overlay();
 
     draw_list_->ChannelsSetCurrent(DrawChannel::GIZMO);
-    UI_Gizmo();
+    UI_3D();
   }
 
   // NOTE: this will be called after PanelManager handled insert/split/close etc...
