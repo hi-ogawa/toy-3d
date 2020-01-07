@@ -304,25 +304,21 @@ struct PanelManager {
     _processPanels();
   }
 
-  void processUI(const ivec2& content_offset, const ivec2& content_size) {
-    content_offset_ = content_offset;
-    content_size_ = content_size;
-    _processResize();
-    _processPanels();
-  }
-
   void processPostUI() {
-    for (auto& command : command_queue_) {
-      command();
-    }
-    command_queue_ = {};
-
     // Panel has chance to push content (cf. RenderPanel in scene_example)
     for (auto& [_, panel] : panels_) {
       if (auto _ = ImScoped::Window(panel->id_.data())) {
         panel->processPostUI();
       };
     }
+  }
+
+  // handle insert/remove panel
+  void endFrame() {
+    for (auto& command : command_queue_) {
+      command();
+    }
+    command_queue_ = {};
   }
 };
 

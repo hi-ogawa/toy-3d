@@ -168,20 +168,12 @@ struct SceneManager {
 // UIs
 //
 
-// todo: is it possible to support multiple ViewportPanel instantiations? (not really useful though)
 struct ViewportPanel : Panel {
   constexpr static const char* type = "Viewport";
   unique_ptr<utils::gl::Framebuffer> framebuffer_;
   SceneManager& mng_;
   ImDrawList* draw_list_;
   Camera camera_;
-
-  struct DrawChannel { enum { // scoped untyped enum
-    SCENE_IMAGE = 0,
-    GIZMO,
-    OVERLAY,
-    CHANNELS_COUNT,
-  };};
 
   // todo: migrate to EditorContext
   struct UIContext {
@@ -224,6 +216,13 @@ struct ViewportPanel : Panel {
     framebuffer_.reset(new utils::gl::Framebuffer);
     camera_.transform_[3] = fvec4{0, 0, 4, 1};
     mng_.editor_.ctx_ = &ctx_;
+  }
+
+  // todo: until UIContext is migrated to somewhere
+  ~ViewportPanel() {
+    if (mng_.editor_.ctx_ == &ctx_) {
+      mng_.editor_.ctx_ = nullptr;
+    }
   }
 
   void setupContext() {
@@ -372,37 +371,28 @@ struct ViewportPanel : Panel {
     }
   }
 
+  void UI_Image() {
+    ImGui::GetWindowDrawList()->AddImage(
+      reinterpret_cast<ImTextureID>(framebuffer_->texture_handle_),
+      ImVec2{content_offset_}, ImVec2{content_offset_ + content_size_},
+        /* uv0 */ {0, 1}, /* uv1 */ {1, 0});
+  }
+
   void processUI() override {
-    // Setup
+    // Setup state
     camera_.aspect_ratio_ = (float)content_size_[0] / content_size_[1];
     framebuffer_->setSize({content_size_[0], content_size_[1]});
     draw_list_ = ImGui::GetWindowDrawList();
     setupContext();
 
-    // Draw UI
-    draw_list_->ChannelsSplit(DrawChannel::CHANNELS_COUNT);
-
-    draw_list_->ChannelsSetCurrent(DrawChannel::OVERLAY);
-    UI_Overlay();
-
-    draw_list_->ChannelsSetCurrent(DrawChannel::GIZMO);
+    // Imgui calls
+    UI_Image();
     UI_3D();
+    UI_Overlay();
   }
 
-  // NOTE: this will be called after PanelManager handled insert/split/close etc...
-  //       so, ImGui won't use texture if panel is closed within current event loop,
-  //       which would cause "message = GL_INVALID_OPERATION in glBindTexture(non-gen name)".
   void processPostUI() override {
     mng_.renderer_->draw(*mng_.scene_, camera_, *framebuffer_);
-
-    // Show texture as ImGui quad
-    draw_list_->ChannelsSetCurrent(DrawChannel::SCENE_IMAGE);
-    ImGui::GetWindowDrawList()->AddImage(
-      reinterpret_cast<ImTextureID>(framebuffer_->texture_handle_),
-      ImVec2{content_offset_}, ImVec2{content_offset_ + content_size_},
-        /* uv0 */ {0, 1}, /* uv1 */ {1, 0});
-
-    draw_list_->ChannelsMerge();
   }
 };
 
@@ -483,7 +473,10 @@ struct AssetsPanel : Panel {
   }
 
   void UI_Active() {
-    auto& node = ((ViewportPanel::UIContext*)mng_.editor_.ctx_)->active_node;
+    auto ctx = (ViewportPanel::UIContext*)mng_.editor_.ctx_;
+    if (!ctx) { return; }
+
+    auto& node = ctx->active_node;
     if (!node) { return; }
 
     if (auto _ = ImScoped::TreeNodeEx(node->name_.data(), ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -602,6 +595,7 @@ struct App {
       processUI();
       panel_manager_->processPostUI();
       window_->render();
+      panel_manager_->endFrame();
       done_ = done_ || window_->shouldClose();
     }
     return 0;

@@ -60,6 +60,7 @@ struct App {
       processUI();
       panel_manager_->processPostUI();
       window_->render();
+      panel_manager_->endFrame();
       done_ = done_ || window_->shouldClose();
     }
     return 0;
